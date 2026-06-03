@@ -30,8 +30,44 @@ export function buildPrompt(generatorId: GeneratorId, values: Record<string, str
     "prospecting-email":
       "Cree un e-mail de prospection court et professionnel. Structure avec: Objet, E-mail, Relance courte. Le ton doit etre humain, direct, premium, et viser un rendez-vous.",
     "editorial-calendar":
-      "Cree un calendrier editorial clair sous forme de planning hebdomadaire. Inclure les idees de posts, formats, canaux, objectifs, accroches et dates importantes."
+      "Cree un calendrier editorial clair sous forme de planning hebdomadaire. Inclure les idees de posts, formats, canaux, objectifs, accroches et dates importantes.",
+    "agent-builder": `Tu es un expert en création d’agents IA, SaaS, automatisation, marketing local et communication digitale.
+
+Ta mission est de créer une fiche complète d’agent IA pour NØLINE AI STUDIO.
+
+L’agent doit être concret, vendable, simple à comprendre et exploitable par des clubs sportifs, associations, entreprises locales ou projets internes.
+
+À partir des informations suivantes :
+
+Nom de l’agent : ${values.agentName || ""}
+Type de client : ${values.clientType || ""}
+Mission : ${values.mission || ""}
+Fonctionnalités souhaitées : ${values.features || ""}
+Tonalité : ${values.tone || ""}
+Niveau de complexité : ${values.complexity || ""}
+Objectif commercial : ${values.businessGoal || ""}
+
+Génère :
+
+1. Nom final
+2. Description courte
+3. Public cible
+4. Problème résolu
+5. Fonctionnalités principales
+6. Champs nécessaires
+7. Boutons/actions
+8. Prompt système complet
+9. Exemples d’utilisation
+10. Limites
+11. Argumentaire commercial
+12. Prix conseillé
+13. Version gratuite/premium
+14. Évolutions V2`
   };
+
+  if (generatorId === "agent-builder") {
+    return tasks[generatorId];
+  }
 
   return `${sharedRules}\n\nMission:\n${tasks[generatorId]}\n\nInformations:\n${payload}`;
 }

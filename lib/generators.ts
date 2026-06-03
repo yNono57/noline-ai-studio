@@ -1,5 +1,6 @@
 import {
   Briefcase,
+  Bot,
   CalendarDays,
   CalendarRange,
   FileText,
@@ -22,9 +23,10 @@ export type GeneratorId =
   | "noline-quote"
   | "commercial-proposal"
   | "prospecting-email"
-  | "editorial-calendar";
+  | "editorial-calendar"
+  | "agent-builder";
 
-export type FieldType = "text" | "date" | "time" | "textarea" | "select";
+export type FieldType = "text" | "date" | "time" | "textarea" | "select" | "multiselect";
 
 export type GeneratorField = {
   name: string;
@@ -280,6 +282,65 @@ export const generators: GeneratorConfig[] = [
         name: "keyDates",
         label: "Dates importantes",
         placeholder: "Ex. Match le 12, tournoi le 20, sponsor a annoncer",
+        type: "textarea"
+      }
+    ]
+  },
+  {
+    id: "agent-builder",
+    title: "Agent Builder",
+    description: "Cree une fiche complete d'agent IA concret, vendable et exploitable.",
+    icon: Bot,
+    plan: "Premium",
+    outputLabel: "Fiche complete d'agent IA",
+    visual: false,
+    fields: [
+      { name: "agentName", label: "Nom de l'agent", placeholder: "Ex. Sponsor Finder AI", type: "text" },
+      { name: "clientType", label: "Type de client", placeholder: "Ex. club sportif amateur", type: "text" },
+      {
+        name: "mission",
+        label: "Mission",
+        placeholder: "Ex. aider le club a trouver et relancer des sponsors locaux",
+        type: "textarea"
+      },
+      {
+        name: "features",
+        label: "Fonctionnalites",
+        placeholder: "Ex. analyse du besoin, generation d'e-mails, suivi des relances",
+        type: "textarea"
+      },
+      {
+        name: "tone",
+        label: "Tonalité",
+        placeholder: "Choisir une ou plusieurs tonalités",
+        type: "multiselect",
+        options: [
+          "Premium",
+          "Directe",
+          "Pédagogique",
+          "Chaleureuse",
+          "Institutionnelle",
+          "Commerciale",
+          "Sportive",
+          "Dynamique",
+          "Familiale",
+          "Ultra / Supporters",
+          "Associative",
+          "Créative",
+          "Corporate"
+        ]
+      },
+      {
+        name: "complexity",
+        label: "Niveau de complexite",
+        placeholder: "Choisir",
+        type: "select",
+        options: ["Simple", "Intermediaire", "Avance"]
+      },
+      {
+        name: "businessGoal",
+        label: "Objectif commercial",
+        placeholder: "Ex. vendre un abonnement mensuel a 99 EUR aux clubs locaux",
         type: "textarea"
       }
     ]

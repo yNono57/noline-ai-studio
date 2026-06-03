@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Bot,
   BriefcaseBusiness,
   Clock3,
   ContactRound,
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/generators", label: "Generateurs", icon: Wand2 },
   { href: "/generate", label: "Creer", icon: Sparkles },
+  { href: "/agent-builder", label: "Agent Builder", icon: Bot },
   { href: "/creations", label: "Mes creations", icon: LayoutTemplate },
   { href: "/clients", label: "Clients", icon: UsersRound },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },

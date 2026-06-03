@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Loader2, Sparkles } from "lucide-react";
+import { AlertCircle, Check, Loader2, Sparkles } from "lucide-react";
 import { generators, type GeneratorConfig, type GeneratorId } from "@/lib/generators";
 import { saveRecord } from "@/lib/history";
 import { getAuthHeaders, isSupabaseBrowserConfigured } from "@/lib/supabase-client";
@@ -20,6 +20,7 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
   );
   const [selectedId, setSelectedId] = useState<GeneratorId>(initialGenerator.id);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [multiValues, setMultiValues] = useState<Record<string, string[]>>({});
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [demo, setDemo] = useState(false);
@@ -31,7 +32,13 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
 
   useEffect(() => {
     const defaults = Object.fromEntries(selected.fields.map((field) => [field.name, ""]));
+    const multiDefaults = Object.fromEntries(
+      selected.fields
+        .filter((field) => field.type === "multiselect")
+        .map((field) => [field.name, []])
+    );
     setValues(defaults);
+    setMultiValues(multiDefaults);
     setOutput("");
     setError("");
     setDemo(false);
@@ -53,11 +60,32 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
     setValues((current) => ({ ...current, [name]: value }));
   }
 
+  function toggleMultiValue(name: string, option: string) {
+    setMultiValues((current) => {
+      const selected = current[name] || [];
+      const next = selected.includes(option)
+        ? selected.filter((item) => item !== option)
+        : [...selected, option];
+
+      return { ...current, [name]: next };
+    });
+  }
+
+  function buildSubmitValues() {
+    return {
+      ...values,
+      ...Object.fromEntries(
+        Object.entries(multiValues).map(([name, selected]) => [name, selected.join(", ")])
+      )
+    };
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError("");
     setOutput("");
+    const submitValues = buildSubmitValues();
 
     try {
       const response = await fetch("/api/generate", {
@@ -66,7 +94,7 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
           "Content-Type": "application/json",
           ...getAuthHeaders()
         },
-        body: JSON.stringify({ generatorId: selected.id, values })
+        body: JSON.stringify({ generatorId: selected.id, values: submitValues })
       });
       const data = (await response.json()) as { output?: string; error?: string; demo?: boolean };
 
@@ -82,7 +110,7 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
           generatorId: selected.id,
           title: selected.title,
           createdAt: new Date().toISOString(),
-          values,
+          values: submitValues,
           output: data.output
         });
       }
@@ -160,10 +188,60 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
           </div>
 
           <form onSubmit={submit} className="space-y-4">
-            {selected.fields.map((field) => (
-              <label key={field.name} className="block">
-                <span className="mb-2 block text-sm font-bold text-white">{field.label}</span>
-                {field.type === "textarea" ? (
+            {selected.fields.map((field) => {
+              if (field.type === "multiselect") {
+                const selectedValues = multiValues[field.name] || [];
+
+                return (
+                  <div key={field.name} className="block">
+                    <span className="mb-2 block text-sm font-bold text-white">{field.label}</span>
+                    <p className="mb-3 text-xs font-bold text-noline-muted">
+                      Selectionnez une ou plusieurs tonalites.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
+                      {field.options?.map((option) => {
+                        const selected = selectedValues.includes(option);
+
+                        return (
+                          <label key={option} className="block">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleMultiValue(field.name, option)}
+                              className="sr-only"
+                            />
+                            <span
+                              className={`inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-xs font-black leading-4 transition sm:text-sm ${
+                                selected
+                                  ? "border-noline-orange bg-noline-orange text-white shadow-[0_0_0_1px_rgba(255,107,0,0.25)]"
+                                  : "border-white/10 bg-noline-black text-noline-muted hover:border-white/30 hover:text-white"
+                              }`}
+                            >
+                              <span>{option}</span>
+                              {selected ? <Check className="h-4 w-4 shrink-0" /> : null}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-3 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white">
+                      {selectedValues.length > 0
+                        ? `Tonalites selectionnees : ${selectedValues.join(", ")}`
+                        : "Aucune tonalite selectionnee"}
+                    </p>
+                    {process.env.NODE_ENV === "development" ? (
+                      <p className="mt-2 rounded-md border border-white/10 bg-noline-black px-3 py-2 text-[11px] font-bold text-noline-muted">
+                        DEBUG {field.name}: {JSON.stringify(selectedValues)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }
+
+              return (
+                <label key={field.name} className="block">
+                  <span className="mb-2 block text-sm font-bold text-white">{field.label}</span>
+                  {field.type === "textarea" ? (
                   <textarea
                     value={values[field.name] || ""}
                     onChange={(event) => updateValue(field.name, event.target.value)}
@@ -193,8 +271,9 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
                     className="w-full rounded-md border border-white/10 bg-noline-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-noline-muted focus:border-noline-orange"
                   />
                 )}
-              </label>
-            ))}
+                </label>
+              );
+            })}
 
             {error ? (
               <div className="flex items-start gap-2 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">
