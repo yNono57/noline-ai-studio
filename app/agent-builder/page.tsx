@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertCircle, Bot, Check, Loader2, Sparkles } from "lucide-react";
+import { AlertCircle, Bot, Check, Loader2, Save, Sparkles } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { Shell } from "@/components/Shell";
 import { generators, type GeneratorConfig } from "@/lib/generators";
+import { saveAgentLocal } from "@/lib/agents";
 import { saveRecord } from "@/lib/history";
 import { getAuthHeaders, isSupabaseBrowserConfigured } from "@/lib/supabase-client";
 
@@ -21,6 +22,10 @@ export default function AgentBuilderPage() {
   const [error, setError] = useState("");
   const [demo, setDemo] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [lastSubmitValues, setLastSubmitValues] = useState<Record<string, string> | null>(null);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   function updateValue(name: string, value: string) {
     setValues((current) => ({ ...current, [name]: value }));
@@ -45,6 +50,8 @@ export default function AgentBuilderPage() {
     setError("");
     setOutput("");
     setDemo(false);
+    setSaveMessage("");
+    setSaveError("");
     const submitValues = buildSubmitValues();
 
     try {
@@ -64,6 +71,7 @@ export default function AgentBuilderPage() {
 
       setOutput(data.output);
       setDemo(Boolean(data.demo));
+      setLastSubmitValues(submitValues);
 
       if (!isSupabaseBrowserConfigured()) {
         saveRecord({
@@ -79,6 +87,53 @@ export default function AgentBuilderPage() {
       setError(caught instanceof Error ? caught.message : "Une erreur est survenue.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveAgent() {
+    if (!output || !lastSubmitValues) return;
+
+    const agent = {
+      name: lastSubmitValues.agentName,
+      clientType: lastSubmitValues.clientType,
+      mission: lastSubmitValues.mission,
+      features: lastSubmitValues.features,
+      tone: lastSubmitValues.tone,
+      complexity: lastSubmitValues.complexity,
+      businessGoal: lastSubmitValues.businessGoal,
+      output
+    };
+
+    setSavingAgent(true);
+    setSaveMessage("");
+    setSaveError("");
+
+    try {
+      if (!isSupabaseBrowserConfigured()) {
+        saveAgentLocal(agent);
+        setSaveMessage("Agent sauvegarde dans votre bibliotheque locale.");
+        return;
+      }
+
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(agent)
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error || "Sauvegarde impossible.");
+      }
+
+      setSaveMessage("Agent sauvegarde dans votre bibliotheque.");
+    } catch (caught) {
+      setSaveError(caught instanceof Error ? caught.message : "Une erreur est survenue.");
+    } finally {
+      setSavingAgent(false);
     }
   }
 
@@ -233,8 +288,36 @@ export default function AgentBuilderPage() {
                     : "Sortie structuree pour vendre et produire l'agent."}
                 </p>
               </div>
-              <CopyButton text={output} />
+              <div className="flex flex-wrap gap-2">
+                <CopyButton text={output} />
+                {output ? (
+                  <button
+                    type="button"
+                    onClick={saveAgent}
+                    disabled={savingAgent}
+                    className="inline-flex items-center gap-2 rounded-md bg-noline-orange px-4 py-2 text-sm font-black text-noline-black transition hover:bg-white disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {savingAgent ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    {savingAgent ? "Sauvegarde..." : "Sauvegarder l'agent"}
+                  </button>
+                ) : null}
+              </div>
             </div>
+            {saveMessage ? (
+              <div className="mb-4 rounded-md border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm font-bold text-emerald-100">
+                {saveMessage}
+              </div>
+            ) : null}
+            {saveError ? (
+              <div className="mb-4 flex items-start gap-2 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                {saveError}
+              </div>
+            ) : null}
             <pre className="min-h-0 flex-1 whitespace-pre-wrap rounded-md border border-white/10 bg-noline-black p-4 text-sm leading-7 text-white">
               {output ||
                 "La fiche d'agent apparaitra ici apres generation: nom final, public cible, prompt systeme, argumentaire, prix et evolutions."}

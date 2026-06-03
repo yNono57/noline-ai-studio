@@ -46,6 +46,20 @@ create table if not exists public.generated_visuals (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.agents (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
+  name text not null,
+  client_type text not null,
+  mission text not null,
+  features text not null,
+  tone text not null,
+  complexity text not null,
+  business_goal text not null,
+  output text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.monthly_quotas (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -82,10 +96,14 @@ create index if not exists subscriptions_stripe_customer_id_idx
 create index if not exists subscriptions_stripe_subscription_id_idx
   on public.subscriptions(stripe_subscription_id);
 
+create index if not exists agents_user_id_created_at_idx
+  on public.agents(user_id, created_at desc);
+
 alter table public.profiles enable row level security;
 alter table public.client_brands enable row level security;
 alter table public.generated_texts enable row level security;
 alter table public.generated_visuals enable row level security;
+alter table public.agents enable row level security;
 alter table public.monthly_quotas enable row level security;
 alter table public.subscriptions enable row level security;
 
@@ -99,6 +117,9 @@ create policy "generated texts own rows" on public.generated_texts
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "generated visuals own rows" on public.generated_visuals
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "agents own rows" on public.agents
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "monthly quotas own rows" on public.monthly_quotas

@@ -24,6 +24,7 @@ const navItems = [
   { href: "/generators", label: "Generateurs", icon: Wand2 },
   { href: "/generate", label: "Creer", icon: Sparkles },
   { href: "/agent-builder", label: "Agent Builder", icon: Bot },
+  { href: "/agents", label: "Mes agents", icon: Bot },
   { href: "/creations", label: "Mes creations", icon: LayoutTemplate },
   { href: "/clients", label: "Clients", icon: UsersRound },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },

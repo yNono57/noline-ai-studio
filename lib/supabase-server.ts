@@ -143,6 +143,58 @@ export async function saveGeneratedText({
   });
 }
 
+export async function saveAgent({
+  userId,
+  name,
+  clientType,
+  mission,
+  features,
+  tone,
+  complexity,
+  businessGoal,
+  output
+}: {
+  userId: string;
+  name: string;
+  clientType: string;
+  mission: string;
+  features: string;
+  tone: string;
+  complexity: string;
+  businessGoal: string;
+  output: string;
+}) {
+  const data = await supabaseAdmin("/rest/v1/agents", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: userId,
+      name,
+      client_type: clientType,
+      mission,
+      features,
+      tone,
+      complexity,
+      business_goal: businessGoal,
+      output
+    })
+  });
+
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function listAgents(userId: string) {
+  return supabaseAdmin(
+    `/rest/v1/agents?user_id=eq.${userId}&select=*&order=created_at.desc`,
+    { method: "GET" }
+  );
+}
+
+export async function deleteAgent(userId: string, id: string) {
+  await supabaseAdmin(`/rest/v1/agents?id=eq.${id}&user_id=eq.${userId}`, {
+    method: "DELETE"
+  });
+}
+
 export async function supabaseAdmin(path: string, init: RequestInit = {}) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
