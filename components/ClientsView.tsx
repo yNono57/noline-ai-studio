@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Eye, Pencil, Plus, Trash2, X } from "lucide-react";
 import {
   deleteClient,
   emptyAgencyClient,
@@ -20,6 +20,7 @@ export function ClientsView() {
   const [form, setForm] = useState<ClientForm>(emptyAgencyClient);
   const [editingId, setEditingId] = useState("");
   const [activeId, setActiveId] = useState("");
+  const [viewing, setViewing] = useState<AgencyClient | null>(null);
 
   useEffect(() => setClients(readClients()), []);
 
@@ -60,9 +61,14 @@ export function ClientsView() {
       logo: client.logo,
       primaryColor: client.primaryColor,
       secondaryColor: client.secondaryColor,
-      socials: client.socials,
+      slogan: client.slogan,
       email: client.email,
+      phone: client.phone,
       website: client.website,
+      facebook: client.facebook,
+      instagram: client.instagram,
+      linkedin: client.linkedin,
+      tiktok: client.tiktok,
       notes: client.notes
     });
   }
@@ -96,9 +102,16 @@ export function ClientsView() {
             <Color label="Couleur 1" value={form.primaryColor} onChange={(value) => update("primaryColor", value)} />
             <Color label="Couleur 2" value={form.secondaryColor} onChange={(value) => update("secondaryColor", value)} />
           </div>
-          <Field label="Reseaux sociaux" value={form.socials} onChange={(value) => update("socials", value)} placeholder="@client, facebook.com/client" />
+          <Field label="Slogan" value={form.slogan} onChange={(value) => update("slogan", value)} placeholder="Ex. Ensemble, plus loin" />
           <Field label="E-mail" value={form.email} onChange={(value) => update("email", value)} placeholder="contact@client.fr" />
+          <Field label="Téléphone" value={form.phone} onChange={(value) => update("phone", value)} placeholder="06 00 00 00 00" />
           <Field label="Site web" value={form.website} onChange={(value) => update("website", value)} placeholder="https://client.fr" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Facebook" value={form.facebook} onChange={(value) => update("facebook", value)} placeholder="facebook.com/client" />
+            <Field label="Instagram" value={form.instagram} onChange={(value) => update("instagram", value)} placeholder="@client" />
+            <Field label="LinkedIn" value={form.linkedin} onChange={(value) => update("linkedin", value)} placeholder="linkedin.com/company/client" />
+            <Field label="TikTok" value={form.tiktok} onChange={(value) => update("tiktok", value)} placeholder="@client" />
+          </div>
           <TextArea label="Notes" value={form.notes} onChange={(value) => update("notes", value)} placeholder="Contexte, offres, objectifs..." />
         </div>
         <button className="mt-5 inline-flex items-center gap-2 rounded-md bg-noline-orange px-5 py-3 text-sm font-black text-noline-black hover:bg-white">
@@ -128,6 +141,7 @@ export function ClientsView() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => activate(client.id)} className={`rounded-md px-3 py-2 text-xs font-black ${activeId === client.id ? "bg-noline-orange text-noline-black" : "bg-white/10 text-white"}`}>Choisir</button>
+                  <button onClick={() => setViewing(client)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white hover:bg-white hover:text-noline-black" aria-label="Voir la fiche"><Eye className="h-4 w-4" /></button>
                   <button onClick={() => edit(client)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white hover:bg-white hover:text-noline-black"><Pencil className="h-4 w-4" /></button>
                   <button onClick={() => remove(client.id)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white hover:bg-red-500"><Trash2 className="h-4 w-4" /></button>
                 </div>
@@ -136,8 +150,48 @@ export function ClientsView() {
           ))}
         </div>
       </div>
+
+      {viewing ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm">
+          <article className="surface premium-border max-h-[90vh] w-full max-w-2xl overflow-auto rounded-xl p-6 shadow-premium">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="grid h-16 w-16 place-items-center rounded-lg bg-white">
+                  {viewing.logo ? <img src={viewing.logo} alt={`Logo ${viewing.name}`} className="max-h-14 max-w-14 object-contain" /> : <span className="text-xs font-black text-noline-black">LOGO</span>}
+                </div>
+                <div>
+                  <p className="text-2xl font-black text-white">{viewing.name}</p>
+                  <p className="text-sm text-noline-muted">{viewing.sector}</p>
+                </div>
+              </div>
+              <button onClick={() => setViewing(null)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white" aria-label="Fermer"><X className="h-4 w-4" /></button>
+            </div>
+            <p className="mt-5 text-lg font-bold text-noline-orange">{viewing.slogan || "Aucun slogan renseigné"}</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <ClientInfo label="E-mail" value={viewing.email} />
+              <ClientInfo label="Téléphone" value={viewing.phone} />
+              <ClientInfo label="Site web" value={viewing.website} link />
+              <ClientInfo label="Facebook" value={viewing.facebook} />
+              <ClientInfo label="Instagram" value={viewing.instagram} />
+              <ClientInfo label="LinkedIn" value={viewing.linkedin} />
+              <ClientInfo label="TikTok" value={viewing.tiktok} />
+              <div className="rounded-md border border-white/10 bg-noline-black p-3">
+                <p className="text-xs font-black uppercase tracking-[0.15em] text-noline-muted">Couleurs</p>
+                <div className="mt-2 flex gap-2">
+                  {[viewing.primaryColor, viewing.secondaryColor].map((color) => <span key={color} className="h-7 w-14 rounded border border-white/20" style={{ backgroundColor: color }} title={color} />)}
+                </div>
+              </div>
+            </div>
+            {viewing.notes ? <p className="mt-4 rounded-md bg-white/5 p-4 text-sm leading-6 text-noline-muted">{viewing.notes}</p> : null}
+          </article>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function ClientInfo({ label, value, link = false }: { label: string; value: string; link?: boolean }) {
+  return <div className="rounded-md border border-white/10 bg-noline-black p-3"><p className="text-xs font-black uppercase tracking-[0.15em] text-noline-muted">{label}</p>{link && value ? <a href={value} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 text-sm font-bold text-white hover:text-noline-orange">{value}<ExternalLink className="h-3 w-3" /></a> : <p className="mt-2 text-sm text-white">{value || "Non renseigné"}</p>}</div>;
 }
 
 function countCreations(clientName: string) {

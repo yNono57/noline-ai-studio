@@ -26,7 +26,7 @@ export function AccountSummary() {
   }, []);
 
   const used = data?.quota?.used ?? 0;
-  const limit = data?.quota?.limit ?? 5;
+  const limit = data?.quota?.limit ?? 20;
   const progress = Math.min(100, Math.round((used / limit) * 100));
 
   return (

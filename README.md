@@ -13,8 +13,13 @@ Webapp SaaS Next.js pour generer des contenus marketing et des visuels prets a p
 - Historique des textes et visuels generes
 - Authentification email/mot de passe avec Supabase
 - Sauvegarde automatique des creations avec Supabase
-- Quotas mensuels: Gratuit 5 generations/mois, Starter 100, Pro 500
-- Abonnements Stripe: Starter 19 EUR/mois, Pro 49 EUR/mois
+- Dashboard professionnel avec statistiques, activité récente, raccourcis et favoris
+- Agents officiels: Matchday Pro, Sponsor Pro, Community Manager Pro, Commercial Pro et Portfolio Builder
+- Agents personnalisés avec fiches détaillées, variables, prompts et historique lié
+- Clients enrichis: identité, coordonnées, couleurs, slogan et réseaux sociaux
+- Historique filtrable avec favoris, copie et suppression
+- Quotas préparés: Gratuit 20 générations/mois, Pro 100, Business illimité
+- Architecture Stripe conservée mais paiement à activer ultérieurement
 - Endpoint OpenAI cote serveur pour proteger la cle API
 
 ## Stack
@@ -104,15 +109,18 @@ STRIPE_PRO_PRICE_ID=price_pro_monthly
 2. Ouvrir `SQL Editor`.
 3. Copier le contenu de `supabase/schema.sql`.
 4. Executer le script.
-5. Ajouter les variables Supabase dans `.env.local` et dans Vercel.
+5. Exécuter ensuite `supabase/migrations/20260606_professional_ai_agents_platform.sql`.
+6. Ajouter les variables Supabase dans `.env.local` et dans Vercel.
 
 Donnees stockees:
 
 - utilisateurs via Supabase Auth
 - marques clients
 - textes generes
+- agents officiels et personnalisés
+- clients et favoris
 - visuels generes
-- quotas mensuels
+- générations et limites d’usage mensuelles
 - abonnements
 
 Sans Supabase configure, l'application continue de fonctionner avec un historique local dans le navigateur.

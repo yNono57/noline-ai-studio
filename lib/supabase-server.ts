@@ -6,16 +6,17 @@ type SupabaseUser = {
 };
 
 type QuotaState = {
-  plan: "free" | "starter" | "pro";
+  plan: "free" | "starter" | "pro" | "business";
   limit: number;
   used: number;
   month: string;
 };
 
 const planLimits = {
-  free: 5,
+  free: 20,
   starter: 100,
-  pro: 500
+  pro: 100,
+  business: Number.MAX_SAFE_INTEGER
 } as const;
 
 export function isSupabaseServerConfigured() {
@@ -58,10 +59,10 @@ export async function ensureProfile(user: SupabaseUser) {
 
 export async function getQuotaState(userId: string): Promise<QuotaState> {
   const month = new Date().toISOString().slice(0, 7);
-  const subscription = await selectFirst<{ plan?: "free" | "starter" | "pro"; status?: string }>(
+  const subscription = await selectFirst<{ plan?: "free" | "starter" | "pro" | "business"; status?: string }>(
     `/rest/v1/subscriptions?user_id=eq.${userId}&select=plan,status&limit=1`
   );
-  const profile = await selectFirst<{ plan?: "free" | "starter" | "pro" }>(
+  const profile = await selectFirst<{ plan?: "free" | "starter" | "pro" | "business" }>(
     `/rest/v1/profiles?id=eq.${userId}&select=plan&limit=1`
   );
   const activeStatuses = ["active", "trialing"];
@@ -70,18 +71,19 @@ export async function getQuotaState(userId: string): Promise<QuotaState> {
     : profile?.plan || "free";
   const limit = planLimits[plan] || planLimits.free;
   const quota = await selectFirst<{ generation_count: number }>(
-    `/rest/v1/monthly_quotas?user_id=eq.${userId}&month=eq.${month}&select=generation_count&limit=1`
+    `/rest/v1/usage_limits?user_id=eq.${userId}&month=eq.${month}&select=generation_count&limit=1`
   );
 
   if (!quota) {
-    await supabaseAdmin("/rest/v1/monthly_quotas?on_conflict=user_id,month", {
+    await supabaseAdmin("/rest/v1/usage_limits?on_conflict=user_id,month", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({
         user_id: userId,
         month,
+        plan: plan === "starter" ? "pro" : plan,
         generation_count: 0,
-        limit_count: limit
+        limit_count: plan === "business" ? null : limit
       })
     });
   }
@@ -94,7 +96,7 @@ export async function getQuotaState(userId: string): Promise<QuotaState> {
   };
 }
 
-export async function updateUserPlan(userId: string, plan: "free" | "starter" | "pro") {
+export async function updateUserPlan(userId: string, plan: "free" | "starter" | "pro" | "business") {
   await supabaseAdmin(`/rest/v1/profiles?id=eq.${userId}`, {
     method: "PATCH",
     body: JSON.stringify({
@@ -106,12 +108,12 @@ export async function updateUserPlan(userId: string, plan: "free" | "starter" | 
 
 export async function incrementQuota(userId: string, quota: QuotaState) {
   await supabaseAdmin(
-    `/rest/v1/monthly_quotas?user_id=eq.${userId}&month=eq.${quota.month}`,
+    `/rest/v1/usage_limits?user_id=eq.${userId}&month=eq.${quota.month}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         generation_count: quota.used + 1,
-        limit_count: quota.limit,
+        limit_count: quota.plan === "business" ? null : quota.limit,
         updated_at: new Date().toISOString()
       })
     }

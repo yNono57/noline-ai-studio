@@ -5,9 +5,14 @@ export type AgencyClient = {
   logo: string;
   primaryColor: string;
   secondaryColor: string;
-  socials: string;
+  slogan: string;
   email: string;
+  phone: string;
   website: string;
+  facebook: string;
+  instagram: string;
+  linkedin: string;
+  tiktok: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -22,9 +27,14 @@ export const emptyAgencyClient: Omit<AgencyClient, "id" | "createdAt" | "updated
   logo: "",
   primaryColor: "#FF6B00",
   secondaryColor: "#FFFFFF",
-  socials: "",
+  slogan: "",
   email: "",
+  phone: "",
   website: "",
+  facebook: "",
+  instagram: "",
+  linkedin: "",
+  tiktok: "",
   notes: ""
 };
 
@@ -33,7 +43,17 @@ export function readClients(): AgencyClient[] {
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as AgencyClient[]) : [];
+    if (!raw) return [];
+    return (JSON.parse(raw) as Array<Partial<AgencyClient> & { socials?: string }>).map((client) => ({
+      ...emptyAgencyClient,
+      ...client,
+      slogan: client.slogan || "",
+      phone: client.phone || "",
+      facebook: client.facebook || client.socials || "",
+      instagram: client.instagram || "",
+      linkedin: client.linkedin || "",
+      tiktok: client.tiktok || ""
+    })) as AgencyClient[];
   } catch {
     return [];
   }

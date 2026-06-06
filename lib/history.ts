@@ -2,11 +2,14 @@ import type { GeneratorId } from "./generators";
 
 export type GenerationRecord = {
   id: string;
-  generatorId: GeneratorId;
+  generatorId: GeneratorId | string;
   title: string;
   createdAt: string;
   values: Record<string, string>;
   output: string;
+  clientId?: string;
+  clientName?: string;
+  userPrompt?: string;
 };
 
 const STORAGE_KEY = "noline-generation-history";
@@ -30,4 +33,10 @@ export function saveRecord(record: GenerationRecord) {
 
 export function clearHistory() {
   window.localStorage.removeItem(STORAGE_KEY);
+}
+
+export function deleteHistoryRecord(id: string) {
+  const next = readHistory().filter((record) => record.id !== id);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  return next;
 }

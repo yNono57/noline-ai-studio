@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { generators, type GeneratorId } from "@/lib/generators";
 import { buildPrompt } from "@/lib/prompts";
+import { logGenerationError } from "@/lib/server-diagnostics";
 import {
   ensureProfile,
   getQuotaState,
@@ -17,8 +18,13 @@ type GenerateRequest = {
 };
 
 export async function POST(request: Request) {
+  let stage = "parse_request";
+  let generatorId: string | null = null;
+  let userId: string | null = null;
+
   try {
     const body = (await request.json()) as GenerateRequest;
+    generatorId = body.generatorId;
     const generator = generators.find((item) => item.id === body.generatorId);
 
     if (!generator) {
@@ -26,7 +32,9 @@ export async function POST(request: Request) {
     }
 
     const supabaseEnabled = isSupabaseServerConfigured();
+    stage = "authenticate_user";
     const user = supabaseEnabled ? await getUserFromRequest(request) : null;
+    userId = user?.id || null;
     let quotaState: Awaited<ReturnType<typeof getQuotaState>> | null = null;
 
     if (supabaseEnabled) {
@@ -37,7 +45,9 @@ export async function POST(request: Request) {
         );
       }
 
+      stage = "ensure_profile";
       await ensureProfile(user);
+      stage = "load_usage_limit";
       quotaState = await getQuotaState(user.id);
 
       if (quotaState.used >= quotaState.limit) {
@@ -60,10 +70,13 @@ export async function POST(request: Request) {
     }
 
     if (!process.env.OPENAI_API_KEY) {
+      stage = "build_demo_output";
       const output = fallbackOutput(body.generatorId, body.values);
 
       if (user && quotaState) {
+        stage = "increment_demo_usage";
         await incrementQuota(user.id, quotaState);
+        stage = "save_demo_generation";
         await saveGeneratedText({
           userId: user.id,
           generatorId: body.generatorId,
@@ -77,6 +90,7 @@ export async function POST(request: Request) {
     }
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    stage = "openai_chat_completion";
     const completion = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       messages: [
@@ -94,11 +108,25 @@ export async function POST(request: Request) {
     const output = completion.choices[0]?.message?.content?.trim();
 
     if (!output) {
+      logGenerationError({
+        route: "/api/generate",
+        stage: "openai_empty_response",
+        error: new Error("OpenAI returned a completion without text content."),
+        context: {
+          generatorId,
+          userId,
+          completionId: completion.id,
+          model: completion.model,
+          finishReason: completion.choices[0]?.finish_reason || null
+        }
+      });
       return NextResponse.json({ error: "Aucun contenu genere." }, { status: 502 });
     }
 
     if (user && quotaState) {
+      stage = "increment_usage";
       await incrementQuota(user.id, quotaState);
+      stage = "save_generation";
       await saveGeneratedText({
         userId: user.id,
         generatorId: body.generatorId,
@@ -109,7 +137,18 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ output, demo: false });
-  } catch {
+  } catch (error) {
+    logGenerationError({
+      route: "/api/generate",
+      stage,
+      error,
+      context: {
+        generatorId,
+        userId,
+        authorizationHeaderPresent: request.headers.has("authorization")
+      }
+    });
+
     return NextResponse.json(
       { error: "Impossible de generer le contenu pour le moment." },
       { status: 500 }

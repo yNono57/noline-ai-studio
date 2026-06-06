@@ -21,17 +21,17 @@ import { Brand } from "./Brand";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { href: "/generators", label: "Generateurs", icon: Wand2 },
-  { href: "/generate", label: "Creer", icon: Sparkles },
+  { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/generate", label: "Studio IA", icon: Sparkles },
   { href: "/agent-builder", label: "Agent Builder", icon: Bot },
-  { href: "/agents", label: "Mes agents", icon: Bot },
-  { href: "/creations", label: "Mes creations", icon: LayoutTemplate },
   { href: "/clients", label: "Clients", icon: UsersRound },
+  { href: "/history", label: "Historique", icon: Clock3 },
+  { href: "/creations", label: "Créations", icon: LayoutTemplate },
+  { href: "/generators", label: "Générateurs classiques", icon: Wand2 },
   { href: "/templates", label: "Templates", icon: LayoutTemplate },
   { href: "/presentation", label: "Presentation", icon: BriefcaseBusiness },
   { href: "/brand", label: "Marque client", icon: Palette },
   { href: "/crm", label: "CRM", icon: ContactRound },
-  { href: "/history", label: "Historique", icon: Clock3 },
   { href: "/pricing", label: "Tarifs", icon: CreditCard },
   { href: "/settings", label: "Parametres", icon: Settings },
   { href: "/login", label: "Connexion", icon: LogIn }
@@ -49,7 +49,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <nav className="mt-8 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href;
+            const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
 
             return (
               <Link
@@ -93,7 +93,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <nav className="flex gap-2 overflow-x-auto border-t border-white/10 px-4 py-2">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = pathname === item.href;
+              const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
 
               return (
                 <Link

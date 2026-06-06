@@ -72,8 +72,23 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
   }
 
   function buildSubmitValues() {
+    const clientValues: Record<string, string> = activeClient
+      ? {
+          clientId: activeClient.id,
+          clientName: activeClient.name,
+          clientSector: activeClient.sector,
+          clientSlogan: activeClient.slogan,
+          clientColors: `${activeClient.primaryColor}, ${activeClient.secondaryColor}`,
+          clientWebsite: activeClient.website,
+          clientFacebook: activeClient.facebook,
+          clientInstagram: activeClient.instagram,
+          clientLinkedIn: activeClient.linkedin,
+          clientTikTok: activeClient.tiktok
+        }
+      : {};
     return {
       ...values,
+      ...clientValues,
       ...Object.fromEntries(
         Object.entries(multiValues).map(([name, selected]) => [name, selected.join(", ")])
       )
@@ -111,7 +126,10 @@ export function GeneratorForm({ initialTool }: GeneratorFormProps) {
           title: selected.title,
           createdAt: new Date().toISOString(),
           values: submitValues,
-          output: data.output
+          output: data.output,
+          clientId: activeClient?.id,
+          clientName: activeClient?.name,
+          userPrompt: Object.values(submitValues).filter(Boolean).join(" · ")
         });
       }
     } catch (caught) {
