@@ -13,6 +13,8 @@ export type AgencyClient = {
   instagram: string;
   linkedin: string;
   tiktok: string;
+  relatedStructure: string;
+  role: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -35,6 +37,8 @@ export const emptyAgencyClient: Omit<AgencyClient, "id" | "createdAt" | "updated
   instagram: "",
   linkedin: "",
   tiktok: "",
+  relatedStructure: "",
+  role: "",
   notes: ""
 };
 
@@ -52,7 +56,9 @@ export function readClients(): AgencyClient[] {
       facebook: client.facebook || client.socials || "",
       instagram: client.instagram || "",
       linkedin: client.linkedin || "",
-      tiktok: client.tiktok || ""
+      tiktok: client.tiktok || "",
+      relatedStructure: client.relatedStructure || "",
+      role: client.role || ""
     })) as AgencyClient[];
   } catch {
     return [];

@@ -69,6 +69,8 @@ export function ClientsView() {
       instagram: client.instagram,
       linkedin: client.linkedin,
       tiktok: client.tiktok,
+      relatedStructure: client.relatedStructure,
+      role: client.role,
       notes: client.notes
     });
   }
@@ -103,6 +105,10 @@ export function ClientsView() {
             <Color label="Couleur 2" value={form.secondaryColor} onChange={(value) => update("secondaryColor", value)} />
           </div>
           <Field label="Slogan" value={form.slogan} onChange={(value) => update("slogan", value)} placeholder="Ex. Ensemble, plus loin" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Structure liée / club associé" value={form.relatedStructure} onChange={(value) => update("relatedStructure", value)} placeholder="Ex. SMSHB" />
+            <Field label="Rôle du client" value={form.role} onChange={(value) => update("role", value)} placeholder="Ex. Association de supporters" />
+          </div>
           <Field label="E-mail" value={form.email} onChange={(value) => update("email", value)} placeholder="contact@client.fr" />
           <Field label="Téléphone" value={form.phone} onChange={(value) => update("phone", value)} placeholder="06 00 00 00 00" />
           <Field label="Site web" value={form.website} onChange={(value) => update("website", value)} placeholder="https://client.fr" />
@@ -175,6 +181,8 @@ export function ClientsView() {
               <ClientInfo label="Instagram" value={viewing.instagram} />
               <ClientInfo label="LinkedIn" value={viewing.linkedin} />
               <ClientInfo label="TikTok" value={viewing.tiktok} />
+              <ClientInfo label="Structure liée" value={viewing.relatedStructure} />
+              <ClientInfo label="Rôle" value={viewing.role} />
               <div className="rounded-md border border-white/10 bg-noline-black p-3">
                 <p className="text-xs font-black uppercase tracking-[0.15em] text-noline-muted">Couleurs</p>
                 <div className="mt-2 flex gap-2">

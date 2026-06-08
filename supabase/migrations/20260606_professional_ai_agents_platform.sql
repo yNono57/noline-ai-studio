@@ -141,6 +141,8 @@ create table if not exists public.clients (
   instagram text,
   linkedin text,
   tiktok text,
+  related_structure text,
+  role text,
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
