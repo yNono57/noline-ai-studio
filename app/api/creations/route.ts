@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: "Non connecte." }, { status: 401 });
 
   const texts = await supabaseAdmin(
-    `/rest/v1/generated_texts?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=30`,
+    `/rest/v1/generations?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=30`,
     { method: "GET" }
   );
   const visuals = await supabaseAdmin(
