@@ -133,7 +133,7 @@ export async function saveGeneratedText({
   values: Record<string, string>;
   output: string;
 }) {
-  await supabaseAdmin("/rest/v1/generated_texts", {
+  await supabaseAdmin("/rest/v1/generations", {
     method: "POST",
     body: JSON.stringify({
       user_id: userId,
