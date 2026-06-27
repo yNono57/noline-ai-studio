@@ -3,3 +3,4 @@ export {
   type AgentBuilderGateway,
   type AgentBuilderRequest
 } from "./agent-builder.service";
+export { MockAgentBuilderGateway } from "./mock-agent-builder.gateway";
