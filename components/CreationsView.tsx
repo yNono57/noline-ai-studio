@@ -30,11 +30,12 @@ export function CreationsView() {
         setTexts(
           (data.texts || []).map((item: Record<string, unknown>) => ({
             id: String(item.id),
-            generatorId: item.generator_id,
-            title: String(item.title),
+            generatorId: String(item.agent_id || item.generator_id || ""),
+            title: String(item.agent_name || item.title || "Agent"),
             createdAt: String(item.created_at),
-            values: (item.values || {}) as Record<string, string>,
-            output: String(item.output)
+            values: (item.input_values || item.values || {}) as Record<string, string>,
+            output: String(item.result || item.output || ""),
+            userPrompt: String(item.user_prompt || "")
           }))
         );
         setVisuals(

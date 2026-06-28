@@ -5,14 +5,15 @@ import Link from "next/link";
 import {
   ArrowDown,
   Bot,
-  Check,
   Copy,
   Loader2,
   Pencil,
-  Save,
   Sparkles,
   Trash2
 } from "lucide-react";
+import { AgentReport } from "@/components/agent-report/AgentReport";
+import { GenerationHistoryCard } from "@/components/agent-report/GenerationHistoryCard";
+import { GenerationProgress } from "@/components/agent-report/GenerationProgress";
 import { CopyButton } from "@/components/CopyButton";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
@@ -315,43 +316,29 @@ export function AgentDetailView({
               className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-noline-orange px-5 py-3 text-sm font-black text-noline-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {agentRunning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-noline-black" />
               ) : (
                 <Bot className="h-4 w-4" />
               )}
               {agentRunning ? "Génération..." : "Générer avec cet agent"}
             </button>
+            {agentRunning ? <GenerationProgress /> : null}
           </form>
 
           {agentOutput ? (
             <div className="mt-6 border-t border-white/10 pt-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="font-black text-white">Résultat</h3>
-                  <p className="mt-1 text-xs text-noline-muted">
-                    {runDemo ? "Mode démonstration" : "Réponse générée par l’agent"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <CopyButton text={agentOutput} />
-                  <button
-                    type="button"
-                    onClick={saveRunToLocalHistory}
-                    disabled={runHistorySaved}
-                    className="inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-2 text-sm font-black text-white transition hover:border-noline-orange disabled:cursor-default disabled:text-emerald-300"
-                  >
-                    {runHistorySaved ? (
-                      <Check className="h-4 w-4" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                    {runHistorySaved ? "Historique sauvegardé" : "Sauvegarder dans l’historique"}
-                  </button>
-                </div>
+              <div className="mb-4">
+                <h3 className="font-black text-white">Rapport généré</h3>
+                <p className="mt-1 text-xs text-noline-muted">
+                  {runDemo ? "Mode démonstration" : "Réponse structurée par l’agent"}
+                </p>
               </div>
-              <pre className="mt-4 whitespace-pre-wrap rounded-lg border border-white/10 bg-noline-black p-4 text-sm leading-7 text-white">
-                {agentOutput}
-              </pre>
+              <AgentReport
+                content={agentOutput}
+                title={`${customAgent.name} — Rapport`}
+                onSave={saveRunToLocalHistory}
+                saved={runHistorySaved}
+              />
             </div>
           ) : null}
         </section>
@@ -409,17 +396,15 @@ export function AgentDetailView({
               ))}
               {error ? <p className="rounded-md bg-red-500/10 p-3 text-sm text-red-100">{error}</p> : null}
               <button disabled={loading} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-noline-orange px-5 py-3 text-sm font-black text-noline-black hover:bg-white disabled:opacity-60">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                {loading ? <span className="h-2 w-2 animate-pulse rounded-full bg-noline-black" /> : <Bot className="h-4 w-4" />}
                 {loading ? "Génération..." : "Générer"}
               </button>
+              {loading ? <GenerationProgress /> : null}
             </form>
             {output ? (
               <div className="mt-6 border-t border-white/10 pt-6">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-black text-white">Résultat</h3>
-                  <CopyButton text={output} />
-                </div>
-                <pre className="mt-4 whitespace-pre-wrap rounded-lg bg-noline-black p-4 text-sm leading-7 text-white">{output}</pre>
+                <h3 className="mb-4 font-black text-white">Rapport généré</h3>
+                <AgentReport content={output} title={`${agent.name} — Rapport`} saved />
               </div>
             ) : null}
           </section>
@@ -431,10 +416,7 @@ export function AgentDetailView({
         <div className="mt-4 grid gap-3">
           {history.length === 0 ? <p className="text-sm text-noline-muted">Aucune génération avec cet agent.</p> : null}
           {history.slice(0, 5).map((record) => (
-            <div key={record.id} className="rounded-lg border border-white/10 bg-noline-black p-4">
-              <p className="text-xs font-bold text-noline-muted">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}</p>
-              <p className="mt-2 line-clamp-2 text-sm text-white">{record.output}</p>
-            </div>
+            <GenerationHistoryCard key={record.id} record={record} />
           ))}
         </div>
       </section>

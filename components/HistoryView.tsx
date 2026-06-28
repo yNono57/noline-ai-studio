@@ -1,17 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, Trash2 } from "lucide-react";
-import { CopyButton } from "./CopyButton";
-import { FavoriteButton } from "./FavoriteButton";
+import { Search } from "lucide-react";
+import { GenerationHistoryCard } from "./agent-report/GenerationHistoryCard";
 import { deleteHistoryRecord, readHistory, type GenerationRecord } from "@/lib/history";
+import {
+  getAuthHeaders,
+  isSupabaseBrowserConfigured
+} from "@/lib/supabase-client";
 
 export function HistoryView() {
   const [records, setRecords] = useState<GenerationRecord[]>([]);
   const [query, setQuery] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
 
-  useEffect(() => setRecords(readHistory()), []);
+  useEffect(() => {
+    if (!isSupabaseBrowserConfigured()) {
+      setRecords(readHistory());
+      return;
+    }
+
+    fetch("/api/creations", { headers: getAuthHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const remote = Array.isArray(data?.texts)
+          ? data.texts.map(normalizeGeneration)
+          : [];
+        setRecords(remote.length > 0 ? remote : readHistory());
+      })
+      .catch(() => setRecords(readHistory()));
+  }, []);
 
   const agents = useMemo(
     () => Array.from(new Map(records.map((record) => [record.generatorId, record.title])).entries()),
@@ -56,29 +74,18 @@ export function HistoryView() {
           <div className="surface premium-border rounded-xl p-8 text-center text-noline-muted">Aucune génération à afficher.</div>
         ) : (
           filtered.map((record) => (
-            <article key={record.id} className="surface premium-border rounded-xl p-5">
-              <div className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-black text-white">{record.title}</h2>
-                    {record.clientName ? <span className="rounded-full bg-noline-orange/15 px-2 py-1 text-xs font-black text-noline-orange">{record.clientName}</span> : null}
-                  </div>
-                  <p className="mt-1 text-xs text-noline-muted">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}</p>
-                </div>
-                <div className="flex gap-2">
-                  <CopyButton text={record.output} />
-                  <FavoriteButton type="generation" targetId={record.id} label={record.title} compact />
-                  <button type="button" onClick={() => setRecords(deleteHistoryRecord(record.id))} className="grid h-9 w-9 place-items-center rounded-md border border-red-400/30 text-red-200" aria-label="Supprimer"><Trash2 className="h-4 w-4" /></button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-[0.7fr_1.3fr]">
-                <div className="rounded-lg bg-white/5 p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-noline-orange">Prompt utilisateur</p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-noline-muted">{record.userPrompt || formatValues(record.values)}</p>
-                </div>
-                <pre className="whitespace-pre-wrap rounded-lg bg-noline-black p-4 text-sm leading-7 text-white">{record.output}</pre>
-              </div>
-            </article>
+            <GenerationHistoryCard
+              key={record.id}
+              record={{
+                ...record,
+                userPrompt: record.userPrompt || formatValues(record.values)
+              }}
+              onDelete={
+                isSupabaseBrowserConfigured()
+                  ? undefined
+                  : () => setRecords(deleteHistoryRecord(record.id))
+              }
+            />
           ))
         )}
       </div>
@@ -88,4 +95,16 @@ export function HistoryView() {
 
 function formatValues(values: Record<string, string>) {
   return Object.values(values).filter(Boolean).join(" · ") || "Prompt non disponible";
+}
+
+function normalizeGeneration(item: Record<string, unknown>): GenerationRecord {
+  return {
+    id: String(item.id),
+    generatorId: String(item.agent_id || item.generator_id || ""),
+    title: String(item.agent_name || item.title || "Agent"),
+    createdAt: String(item.created_at),
+    values: (item.input_values || item.values || {}) as Record<string, string>,
+    output: String(item.result || item.output || ""),
+    userPrompt: String(item.user_prompt || "")
+  };
 }
