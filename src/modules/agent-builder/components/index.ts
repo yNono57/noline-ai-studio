@@ -1,2 +1,1 @@
-// Public entry point reserved for Agent Builder V2 UI components.
-export {};
+export { AgentBuilderV2 } from "./AgentBuilderV2";

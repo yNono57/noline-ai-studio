@@ -45,13 +45,52 @@ function mockAnalysis(idea: string): IdeaAnalysis {
       "La cible utilise déjà des outils numériques.",
       "Une validation humaine restera nécessaire avant publication."
     ],
-    confidence: restaurantIdea ? "high" : "medium"
+    confidence: restaurantIdea ? "high" : "medium",
+    marketAssessment: {
+      score: 78,
+      marketSize: "Marché large mais fragmenté, à quantifier avec des données sectorielles locales.",
+      maturity: "Maturité numérique intermédiaire avec une adoption croissante des outils SaaS.",
+      competition: "Concurrence active entre logiciels spécialisés et assistants IA généralistes.",
+      difficulty: "Difficulté moyenne : intégrations, confiance et simplicité d'usage seront déterminantes.",
+      saasPotential: {
+        score: 84,
+        rationale: "Besoin récurrent et fonctionnalités standardisables par abonnement."
+      },
+      agencyPotential: {
+        score: 76,
+        rationale: "Accompagnement et personnalisation peuvent soutenir une offre premium."
+      },
+      licensingPotential: {
+        score: 68,
+        rationale: "La licence devient crédible après validation des workflows propriétaires."
+      }
+    }
   };
 }
 
 function mockBusinessScore(): BusinessScore {
   return {
     overall: 76,
+    market: {
+      score: 88,
+      rationale: "La cible est nombreuse et le besoin de productivité est durable."
+    },
+    profitability: {
+      score: 79,
+      rationale: "Les coûts marginaux sont faibles après stabilisation du produit."
+    },
+    originality: {
+      score: 71,
+      rationale: "La différenciation viendra surtout de la spécialisation et des données métier."
+    },
+    easeOfSale: {
+      score: 72,
+      rationale: "La démonstration est simple, mais le retour sur investissement doit être prouvé."
+    },
+    scalability: {
+      score: 86,
+      rationale: "Le socle peut être répliqué avec des modèles et intégrations sectoriels."
+    },
     marketNeed: {
       score: 82,
       rationale: "Le manque de temps et de ressources spécialisées est un besoin fréquent."
@@ -99,6 +138,44 @@ function mockAgent(analysis: IdeaAnalysis | null): GeneratedAgent {
     systemPrompt: `Tu es un copilote spécialisé dans le secteur ${sector}. Tu aides ${targetAudience} avec des réponses concrètes, fiables et directement actionnables.`,
     suggestedInputs: ["Objectif", "Contexte", "Contraintes", "Délai", "Format attendu"],
     expectedOutput: "Un livrable structuré accompagné d'actions prioritaires."
+    ,
+    premiumFeatures: [
+      "Bibliothèque de workflows métier",
+      "Historique et personnalisation par établissement",
+      "Tableau de bord de performance"
+    ],
+    v2Features: ["Intégrations CRM et agenda", "Automatisations multicanales"],
+    futureFeatures: ["Analyse prédictive", "Orchestration de plusieurs agents spécialisés"],
+    differentiation: [
+      "Spécialisation sectorielle",
+      "Livrables directement exploitables",
+      "Parcours guidé sans expertise technique"
+    ],
+    personas: [
+      {
+        name: "Responsable opérationnel",
+        role: "Décideur et utilisateur principal",
+        context: "Petite équipe avec peu de temps disponible.",
+        painPoints: ["Tâches répétitives", "Outils dispersés"],
+        expectedOutcome: "Gagner du temps sans complexifier les opérations."
+      }
+    ],
+    customerObjections: [
+      {
+        objection: "Un outil supplémentaire sera trop complexe.",
+        response: "Le parcours guidé se concentre sur quelques tâches à forte valeur."
+      }
+    ],
+    salesArguments: [
+      "Réduction mesurable du temps de préparation",
+      "Expertise métier disponible à la demande"
+    ],
+    pricing: {
+      recommendedPrice: "99 € à 199 € HT par mois",
+      subscription: "Abonnement mensuel avec essai ou pilote encadré",
+      upsell: ["Configuration personnalisée", "Connecteurs métier", "Formation d'équipe"],
+      rationale: "Tarification à valider selon le temps économisé et le segment ciblé."
+    }
   };
 }
 
@@ -112,7 +189,9 @@ function mockRoadmap(): AgentRoadmap {
         objective: "Confirmer les cas d'usage prioritaires.",
         deliverables: ["Entretiens utilisateurs", "Liste des trois cas d'usage principaux"],
         estimatedDuration: "1 semaine",
-        priority: "high"
+        priority: "high",
+        stage: "MVP",
+        difficulty: "low"
       },
       {
         order: 2,
@@ -120,7 +199,9 @@ function mockRoadmap(): AgentRoadmap {
         objective: "Construire et tester le parcours principal.",
         deliverables: ["Prototype fonctionnel", "Jeu de tests métier"],
         estimatedDuration: "2 à 3 semaines",
-        priority: "high"
+        priority: "high",
+        stage: "V1",
+        difficulty: "medium"
       },
       {
         order: 3,
@@ -128,7 +209,19 @@ function mockRoadmap(): AgentRoadmap {
         objective: "Mesurer l'usage et la valeur produite.",
         deliverables: ["Pilote utilisateurs", "Rapport de retours et métriques"],
         estimatedDuration: "2 semaines",
-        priority: "medium"
+        priority: "medium",
+        stage: "V2",
+        difficulty: "medium"
+      },
+      {
+        order: 4,
+        title: "Industrialisation",
+        objective: "Étendre les intégrations et préparer le passage à l'échelle.",
+        deliverables: ["Connecteurs avancés", "Catalogue d'agents complémentaires"],
+        estimatedDuration: "4 à 8 semaines",
+        priority: "low",
+        stage: "V3",
+        difficulty: "high"
       }
     ],
     successMetrics: ["Temps économisé par tâche", "Taux de livrables validés", "Usage hebdomadaire"],
@@ -155,6 +248,51 @@ function mockRecommendations(): ProductRecommendation[] {
       effort: "medium",
       priority: "high",
       actionItems: ["Recruter cinq testeurs", "Organiser un bilan après deux semaines"]
+    },
+    {
+      title: "Risque d'un positionnement trop générique",
+      category: "risk",
+      rationale: "Une promesse large réduit la perception d'expertise.",
+      expectedImpact: "Clarifier la proposition de valeur et raccourcir le cycle de vente.",
+      effort: "low",
+      priority: "high",
+      actionItems: ["Choisir un segment initial", "Formuler une promesse mesurable"]
+    },
+    {
+      title: "Opportunité de distribution via des partenaires",
+      category: "opportunity",
+      rationale: "Les agences et intégrateurs possèdent déjà la relation avec la cible.",
+      expectedImpact: "Accélérer l'acquisition avec un coût commercial plus faible.",
+      effort: "medium",
+      priority: "medium",
+      actionItems: ["Identifier dix partenaires", "Préparer une offre de licence"]
+    },
+    {
+      title: "Cartographier les concurrents spécialisés",
+      category: "competitor",
+      rationale: "Comparer les workflows métier permet d'éviter une différenciation superficielle.",
+      expectedImpact: "Renforcer le positionnement et prioriser les fonctions distinctives.",
+      effort: "low",
+      priority: "high",
+      actionItems: ["Analyser cinq solutions", "Comparer prix, cible et promesse"]
+    },
+    {
+      title: "Ajouter une boucle d'apprentissage",
+      category: "improvement",
+      rationale: "Les retours utilisateur doivent améliorer les recommandations dans le temps.",
+      expectedImpact: "Augmenter la qualité perçue et la rétention.",
+      effort: "medium",
+      priority: "medium",
+      actionItems: ["Collecter une note après chaque livrable", "Analyser les corrections"]
+    },
+    {
+      title: "Vendre un agent commercial complémentaire",
+      category: "complementary_agent",
+      rationale: "Les données produites peuvent alimenter la prospection et les relances.",
+      expectedImpact: "Créer un upsell naturel et augmenter le revenu par client.",
+      effort: "medium",
+      priority: "medium",
+      actionItems: ["Définir le workflow commercial", "Tester un bundle de deux agents"]
     }
   ];
 }
