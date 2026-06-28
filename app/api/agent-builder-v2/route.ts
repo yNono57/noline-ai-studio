@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   AgentBuilderService,
-  MockAgentBuilderGateway
+  MockAgentBuilderGateway,
+  OpenAIAgentBuilderGateway
 } from "@/src/modules/agent-builder/services";
 import type {
   AgentRoadmap,
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const service = new AgentBuilderService(new MockAgentBuilderGateway());
+    const service = new AgentBuilderService(createGateway());
     const analysis = await service.analyzeIdea({ idea });
     const businessScore = await service.generateBusinessScore({ analysis });
     const agent = await service.generateAgent({ analysis, businessScore });
@@ -76,6 +77,20 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+function createGateway() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const useMock = process.env.USE_MOCK?.toLowerCase() === "true";
+
+  if (!apiKey || useMock) {
+    return new MockAgentBuilderGateway();
+  }
+
+  return new OpenAIAgentBuilderGateway(
+    apiKey,
+    process.env.OPENAI_MODEL || "gpt-4.1-mini"
+  );
 }
 
 function readIdea(body: unknown): string | null {
