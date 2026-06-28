@@ -1,10 +1,15 @@
 import type { AgentBuilderGateway, AgentBuilderRequest } from "./agent-builder.service";
 import type {
   AgentRoadmap,
+  AIImplementationPlan,
   BusinessScore,
+  DevelopmentPlan,
   GeneratedAgent,
   IdeaAnalysis,
-  ProductRecommendation
+  MarketingStrategy,
+  PricingStrategy,
+  ProductRecommendation,
+  UXStrategy
 } from "../types";
 
 export class MockAgentBuilderGateway implements AgentBuilderGateway {
@@ -22,8 +27,138 @@ export class MockAgentBuilderGateway implements AgentBuilderGateway {
         return asResult<TResult>(mockRoadmap());
       case "generate_recommendations":
         return asResult<TResult>(mockRecommendations());
+      case "generate_ux_strategy":
+        return asResult<TResult>(mockUXStrategy());
+      case "generate_pricing_strategy":
+        return asResult<TResult>(mockPricingStrategy());
+      case "generate_marketing_strategy":
+        return asResult<TResult>(mockMarketingStrategy());
+      case "generate_development_plan":
+        return asResult<TResult>(mockDevelopmentPlan());
+      case "generate_ai_implementation_plan":
+        return asResult<TResult>(mockAIImplementationPlan());
     }
   }
+}
+
+function mockUXStrategy(): UXStrategy {
+  return {
+    score: 84,
+    summary: "Une expérience guidée centrée sur un premier résultat rapide et vérifiable.",
+    designPrinciples: ["Une action principale par écran", "Transparence sur le rôle de l'IA"],
+    primaryJourney: [
+      {
+        name: "Premier livrable",
+        userGoal: "Obtenir un résultat utile sans configuration complexe.",
+        interaction: "Brief guidé, aperçu puis validation.",
+        friction: "Manque de contexte dans la demande initiale.",
+        successSignal: "Premier livrable validé en moins de dix minutes."
+      }
+    ],
+    onboarding: ["Choisir un objectif", "Importer un exemple", "Générer puis corriger"],
+    keyScreens: ["Accueil orienté action", "Atelier de génération", "Historique"],
+    accessibility: ["Navigation clavier", "Contrastes AA", "Libellés explicites"],
+    retentionMechanisms: ["Modèles favoris", "Historique réutilisable", "Bilan de valeur"]
+  };
+}
+
+function mockPricingStrategy(): PricingStrategy {
+  return {
+    score: 79,
+    summary: "Un abonnement par niveau d'usage, complété par des services d'activation.",
+    recommendedModel: "Abonnement SaaS avec trois niveaux et options de service.",
+    valueMetric: "Nombre de workflows ou livrables validés par mois.",
+    tiers: [
+      {
+        name: "Essentiel",
+        target: "Indépendants",
+        monthlyPrice: "49 € HT",
+        annualPrice: "490 € HT",
+        features: ["Générations essentielles", "Historique limité"],
+        limits: ["Un utilisateur", "Volume mensuel plafonné"]
+      },
+      {
+        name: "Pro",
+        target: "Petites équipes",
+        monthlyPrice: "129 € HT",
+        annualPrice: "1 290 € HT",
+        features: ["Workflows premium", "Personnalisation"],
+        limits: ["Cinq utilisateurs"]
+      },
+      {
+        name: "Business",
+        target: "Réseaux et agences",
+        monthlyPrice: "Sur devis",
+        annualPrice: "Sur devis",
+        features: ["Multi-entités", "Connecteurs", "Support prioritaire"],
+        limits: ["Cadre d'usage contractuel"]
+      }
+    ],
+    trialStrategy: "Pilote de 14 jours centré sur un cas d'usage mesurable.",
+    upsells: ["Configuration", "Formation", "Connecteurs métier"],
+    validationTests: ["Test de disposition à payer", "Pilote accompagné"],
+    keyMetrics: ["Conversion essai", "Revenu moyen", "Rétention à 90 jours"]
+  };
+}
+
+function mockMarketingStrategy(): MarketingStrategy {
+  return {
+    score: 81,
+    summary: "Une acquisition fondée sur la preuve métier et des démonstrations ciblées.",
+    positioning: "Le copilote IA spécialisé qui livre un résultat exploitable, pas seulement du texte.",
+    corePromise: "Transformer une tâche récurrente en livrable validable en quelques minutes.",
+    channels: [
+      {
+        channel: "LinkedIn",
+        objective: "Créer la demande",
+        audience: "Décideurs de petites équipes",
+        message: "Montrez le temps économisé sur un cas réel.",
+        actions: ["Publier des avant/après", "Diffuser des démonstrations courtes"]
+      }
+    ],
+    launchPlan: ["Recruter dix pilotes", "Publier trois études de cas", "Lancer un webinar"],
+    contentPillars: ["Cas d'usage", "Preuves de valeur", "Méthodes métier"],
+    acquisitionFunnel: ["Contenu", "Démonstration", "Pilote", "Abonnement"],
+    keyMetrics: ["Demandes de démo", "Activation pilote", "Conversion payante"]
+  };
+}
+
+function mockDevelopmentPlan(): DevelopmentPlan {
+  return {
+    score: 86,
+    summary: "Un développement incrémental qui sécurise d'abord le workflow principal.",
+    architecture: "Application modulaire avec API serveur, contrats typés et fournisseur IA interchangeable.",
+    stackRecommendations: ["Next.js", "TypeScript", "Supabase", "OpenAI Structured Outputs"],
+    phases: [
+      {
+        order: 1,
+        name: "Socle MVP",
+        objective: "Livrer le parcours critique.",
+        duration: "2 semaines",
+        difficulty: "medium",
+        deliverables: ["Workflow principal", "Journalisation"],
+        acceptanceCriteria: ["Parcours testable de bout en bout", "Erreurs maîtrisées"]
+      }
+    ],
+    dependencies: ["Accès API", "Jeux de tests métier"],
+    technicalRisks: ["Latence IA", "Évolution des contrats"],
+    qualityGates: ["Lint et build", "Tests de schéma", "Revue sécurité"]
+  };
+}
+
+function mockAIImplementationPlan(): AIImplementationPlan {
+  return {
+    score: 83,
+    summary: "Une architecture IA évaluée, observable et indépendante du fournisseur.",
+    modelStrategy: "Modèle économique par défaut, avec routage vers un modèle supérieur si nécessaire.",
+    promptArchitecture: ["Prompt système versionné", "Contexte métier", "Sortie structurée"],
+    dataRequirements: ["Exemples validés", "Règles métier", "Cas limites"],
+    retrievalStrategy: "Ajouter un RAG uniquement si des connaissances privées et évolutives sont requises.",
+    guardrails: ["Validation de schéma", "Refus explicites", "Limites de taille"],
+    evaluationPlan: ["Jeu d'évaluation métier", "Score de fidélité", "Tests de non-régression"],
+    observability: ["Latence", "Coût", "Erreurs", "Qualité utilisateur"],
+    costOptimization: ["Réduire le contexte", "Mettre en cache les données stables", "Router par complexité"]
+  };
 }
 
 function mockAnalysis(idea: string): IdeaAnalysis {

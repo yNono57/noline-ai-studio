@@ -6,10 +6,15 @@ import {
 } from "@/src/modules/agent-builder/services";
 import type {
   AgentRoadmap,
+  AIImplementationPlan,
   BusinessScore,
+  DevelopmentPlan,
   GeneratedAgent,
   IdeaAnalysis,
-  ProductRecommendation
+  MarketingStrategy,
+  PricingStrategy,
+  ProductRecommendation,
+  UXStrategy
 } from "@/src/modules/agent-builder/types";
 
 interface AgentBuilderV2Response {
@@ -18,6 +23,11 @@ interface AgentBuilderV2Response {
   agent: GeneratedAgent;
   roadmap: AgentRoadmap;
   recommendations: ProductRecommendation[];
+  uxStrategy: UXStrategy;
+  pricingStrategy: PricingStrategy;
+  marketingStrategy: MarketingStrategy;
+  developmentPlan: DevelopmentPlan;
+  aiImplementationPlan: AIImplementationPlan;
 }
 
 const MAX_IDEA_LENGTH = 2_000;
@@ -52,13 +62,38 @@ export async function POST(request: Request) {
       agent,
       roadmap
     });
+    const expertInput = {
+      analysis,
+      businessScore,
+      agent,
+      roadmap,
+      recommendations
+    };
+    const [
+      uxStrategy,
+      pricingStrategy,
+      marketingStrategy,
+      developmentPlan,
+      aiImplementationPlan
+    ] = await Promise.all([
+      service.generateUXStrategy(expertInput),
+      service.generatePricingStrategy(expertInput),
+      service.generateMarketingStrategy(expertInput),
+      service.generateDevelopmentPlan(expertInput),
+      service.generateAIImplementationPlan(expertInput)
+    ]);
 
     const response: AgentBuilderV2Response = {
       analysis,
       businessScore,
       agent,
       roadmap,
-      recommendations
+      recommendations,
+      uxStrategy,
+      pricingStrategy,
+      marketingStrategy,
+      developmentPlan,
+      aiImplementationPlan
     };
 
     return NextResponse.json(response);

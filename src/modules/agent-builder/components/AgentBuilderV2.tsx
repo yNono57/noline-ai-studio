@@ -3,11 +3,16 @@
 import {
   AlertCircle,
   ArrowRight,
+  BadgeEuro,
   Bot,
+  BrainCircuit,
   Check,
   Clipboard,
+  Code2,
   Download,
   Loader2,
+  Megaphone,
+  Palette,
   RefreshCw,
   Sparkles,
   Target,
@@ -18,10 +23,15 @@ import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import type {
   AgentRoadmap,
+  AIImplementationPlan,
   BusinessScore,
+  DevelopmentPlan,
   GeneratedAgent,
   IdeaAnalysis,
-  ProductRecommendation
+  MarketingStrategy,
+  PricingStrategy,
+  ProductRecommendation,
+  UXStrategy
 } from "../types";
 
 interface AgentBuilderV2Response {
@@ -30,6 +40,11 @@ interface AgentBuilderV2Response {
   agent: GeneratedAgent;
   roadmap: AgentRoadmap;
   recommendations: ProductRecommendation[];
+  uxStrategy: UXStrategy;
+  pricingStrategy: PricingStrategy;
+  marketingStrategy: MarketingStrategy;
+  developmentPlan: DevelopmentPlan;
+  aiImplementationPlan: AIImplementationPlan;
 }
 
 interface ResultCard {
@@ -47,7 +62,12 @@ const PROGRESS_STEPS = [
   "Score business",
   "Construction de l'agent",
   "Roadmap",
-  "Recommandations"
+  "Recommandations",
+  "Stratégie UX",
+  "Stratégie tarifaire",
+  "Plan marketing",
+  "Plan de développement",
+  "Implémentation IA"
 ];
 
 const EXAMPLE_IDEA =
@@ -427,6 +447,51 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
       icon: WandSparkles,
       content: recommendationsMarkdown(result.recommendations),
       render: <RecommendationsContent recommendations={result.recommendations} />
+    },
+    {
+      id: "uxStrategy",
+      eyebrow: "Expert V3 · UX",
+      title: "Expérience utilisateur",
+      description: "Le parcours, l’onboarding et les leviers de rétention.",
+      icon: Palette,
+      content: uxStrategyMarkdown(result.uxStrategy),
+      render: <UXStrategyContent strategy={result.uxStrategy} />
+    },
+    {
+      id: "pricingStrategy",
+      eyebrow: "Expert V3 · Pricing",
+      title: "Stratégie tarifaire",
+      description: "Le modèle économique, les offres et les tests de prix.",
+      icon: BadgeEuro,
+      content: pricingStrategyMarkdown(result.pricingStrategy),
+      render: <PricingStrategyContent strategy={result.pricingStrategy} />
+    },
+    {
+      id: "marketingStrategy",
+      eyebrow: "Expert V3 · Growth",
+      title: "Plan marketing",
+      description: "Le positionnement, les canaux et le plan de lancement.",
+      icon: Megaphone,
+      content: marketingStrategyMarkdown(result.marketingStrategy),
+      render: <MarketingStrategyContent strategy={result.marketingStrategy} />
+    },
+    {
+      id: "developmentPlan",
+      eyebrow: "Expert V3 · Tech",
+      title: "Plan de développement",
+      description: "L’architecture, les phases et les garde-fous techniques.",
+      icon: Code2,
+      content: developmentPlanMarkdown(result.developmentPlan),
+      render: <DevelopmentPlanContent plan={result.developmentPlan} />
+    },
+    {
+      id: "aiImplementationPlan",
+      eyebrow: "Expert V3 · AI",
+      title: "Implémentation IA",
+      description: "Les modèles, prompts, évaluations et coûts.",
+      icon: BrainCircuit,
+      content: aiImplementationMarkdown(result.aiImplementationPlan),
+      render: <AIImplementationContent plan={result.aiImplementationPlan} />
     }
   ];
 }
@@ -559,6 +624,129 @@ function RecommendationsContent({
   );
 }
 
+function StrategyHeader({ score, summary }: { score: number; summary: string }) {
+  return (
+    <div className="mb-5 flex flex-col gap-3 border-b border-white/10 pb-5 sm:flex-row sm:items-start">
+      <div className="shrink-0 rounded-lg bg-noline-orange/10 px-4 py-3 text-center">
+        <span className="block text-3xl font-black text-noline-orange">{score}</span>
+        <span className="text-[10px] font-black uppercase text-noline-muted">sur 100</span>
+      </div>
+      <p className="text-sm leading-6 text-white">{summary}</p>
+    </div>
+  );
+}
+
+function UXStrategyContent({ strategy }: { strategy: UXStrategy }) {
+  return (
+    <div>
+      <StrategyHeader score={strategy.score} summary={strategy.summary} />
+      <TagList label="Principes de design" values={strategy.designPrinciples} />
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {strategy.primaryJourney.map((step) => (
+          <InfoItem
+            key={step.name}
+            label={step.name}
+            value={`${step.userGoal} — ${step.interaction} Succès : ${step.successSignal}`}
+          />
+        ))}
+      </div>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <TagList label="Écrans clés" values={strategy.keyScreens} />
+        <TagList label="Accessibilité" values={strategy.accessibility} />
+      </div>
+    </div>
+  );
+}
+
+function PricingStrategyContent({ strategy }: { strategy: PricingStrategy }) {
+  return (
+    <div>
+      <StrategyHeader score={strategy.score} summary={strategy.summary} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <InfoItem label="Modèle recommandé" value={strategy.recommendedModel} />
+        <InfoItem label="Métrique de valeur" value={strategy.valueMetric} />
+      </div>
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {strategy.tiers.map((tier) => (
+          <div key={tier.name} className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+            <p className="text-lg font-black text-white">{tier.name}</p>
+            <p className="mt-1 text-xs text-noline-muted">{tier.target}</p>
+            <p className="mt-4 text-xl font-black text-noline-orange">{tier.monthlyPrice}</p>
+            <ul className="mt-3 space-y-1 text-xs leading-5 text-white">
+              {tier.features.map((feature) => <li key={feature}>— {feature}</li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MarketingStrategyContent({ strategy }: { strategy: MarketingStrategy }) {
+  return (
+    <div>
+      <StrategyHeader score={strategy.score} summary={strategy.summary} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <InfoItem label="Positionnement" value={strategy.positioning} />
+        <InfoItem label="Promesse" value={strategy.corePromise} />
+      </div>
+      <div className="mt-5 space-y-3">
+        {strategy.channels.map((channel) => (
+          <InfoItem
+            key={channel.channel}
+            label={channel.channel}
+            value={`${channel.objective} — ${channel.message}`}
+          />
+        ))}
+      </div>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <TagList label="Plan de lancement" values={strategy.launchPlan} />
+        <TagList label="Indicateurs" values={strategy.keyMetrics} />
+      </div>
+    </div>
+  );
+}
+
+function DevelopmentPlanContent({ plan }: { plan: DevelopmentPlan }) {
+  return (
+    <div>
+      <StrategyHeader score={plan.score} summary={plan.summary} />
+      <InfoItem label="Architecture" value={plan.architecture} />
+      <div className="mt-5 space-y-3">
+        {plan.phases.map((phase) => (
+          <InfoItem
+            key={phase.order}
+            label={`${phase.order}. ${phase.name} · ${phase.duration}`}
+            value={`${phase.objective} Difficulté : ${phase.difficulty}.`}
+          />
+        ))}
+      </div>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <TagList label="Stack recommandée" values={plan.stackRecommendations} />
+        <TagList label="Quality gates" values={plan.qualityGates} />
+      </div>
+    </div>
+  );
+}
+
+function AIImplementationContent({ plan }: { plan: AIImplementationPlan }) {
+  return (
+    <div>
+      <StrategyHeader score={plan.score} summary={plan.summary} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <InfoItem label="Stratégie modèles" value={plan.modelStrategy} />
+        <InfoItem label="Retrieval / RAG" value={plan.retrievalStrategy} />
+      </div>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <TagList label="Architecture des prompts" values={plan.promptArchitecture} />
+        <TagList label="Garde-fous" values={plan.guardrails} />
+        <TagList label="Évaluations" values={plan.evaluationPlan} />
+        <TagList label="Optimisation des coûts" values={plan.costOptimization} />
+      </div>
+    </div>
+  );
+}
+
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
@@ -670,4 +858,130 @@ ${item.rationale}
 ${item.actionItems.map((action) => `- ${action}`).join("\n")}`
   )
   .join("\n\n")}`;
+}
+
+function uxStrategyMarkdown(strategy: UXStrategy) {
+  return `# Expérience utilisateur — ${strategy.score}/100
+
+${strategy.summary}
+
+## Principes
+${strategy.designPrinciples.map((item) => `- ${item}`).join("\n")}
+
+## Parcours principal
+${strategy.primaryJourney
+  .map(
+    (step) => `### ${step.name}
+- **Objectif :** ${step.userGoal}
+- **Interaction :** ${step.interaction}
+- **Friction :** ${step.friction}
+- **Succès :** ${step.successSignal}`
+  )
+  .join("\n\n")}
+
+## Onboarding
+${strategy.onboarding.map((item) => `- ${item}`).join("\n")}
+
+## Accessibilité
+${strategy.accessibility.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function pricingStrategyMarkdown(strategy: PricingStrategy) {
+  return `# Stratégie tarifaire — ${strategy.score}/100
+
+${strategy.summary}
+
+- **Modèle :** ${strategy.recommendedModel}
+- **Métrique de valeur :** ${strategy.valueMetric}
+- **Essai :** ${strategy.trialStrategy}
+
+${strategy.tiers
+  .map(
+    (tier) => `## ${tier.name}
+- **Cible :** ${tier.target}
+- **Mensuel :** ${tier.monthlyPrice}
+- **Annuel :** ${tier.annualPrice}
+${tier.features.map((item) => `- ${item}`).join("\n")}`
+  )
+  .join("\n\n")}
+
+## Upsells
+${strategy.upsells.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function marketingStrategyMarkdown(strategy: MarketingStrategy) {
+  return `# Plan marketing — ${strategy.score}/100
+
+${strategy.summary}
+
+- **Positionnement :** ${strategy.positioning}
+- **Promesse :** ${strategy.corePromise}
+
+## Canaux
+${strategy.channels
+  .map(
+    (channel) => `### ${channel.channel}
+- **Objectif :** ${channel.objective}
+- **Audience :** ${channel.audience}
+- **Message :** ${channel.message}
+${channel.actions.map((item) => `- ${item}`).join("\n")}`
+  )
+  .join("\n\n")}
+
+## Lancement
+${strategy.launchPlan.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function developmentPlanMarkdown(plan: DevelopmentPlan) {
+  return `# Plan de développement — ${plan.score}/100
+
+${plan.summary}
+
+## Architecture
+${plan.architecture}
+
+## Stack
+${plan.stackRecommendations.map((item) => `- ${item}`).join("\n")}
+
+${plan.phases
+  .map(
+    (phase) => `## ${phase.order}. ${phase.name}
+- **Objectif :** ${phase.objective}
+- **Durée :** ${phase.duration}
+- **Difficulté :** ${phase.difficulty}
+
+### Livrables
+${phase.deliverables.map((item) => `- ${item}`).join("\n")}
+
+### Critères d'acceptation
+${phase.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`
+  )
+  .join("\n\n")}`;
+}
+
+function aiImplementationMarkdown(plan: AIImplementationPlan) {
+  return `# Implémentation IA — ${plan.score}/100
+
+${plan.summary}
+
+- **Stratégie modèles :** ${plan.modelStrategy}
+- **Retrieval / RAG :** ${plan.retrievalStrategy}
+
+## Architecture des prompts
+${plan.promptArchitecture.map((item) => `- ${item}`).join("\n")}
+
+## Données
+${plan.dataRequirements.map((item) => `- ${item}`).join("\n")}
+
+## Garde-fous
+${plan.guardrails.map((item) => `- ${item}`).join("\n")}
+
+## Évaluations
+${plan.evaluationPlan.map((item) => `- ${item}`).join("\n")}
+
+## Observabilité
+${plan.observability.map((item) => `- ${item}`).join("\n")}
+
+## Optimisation des coûts
+${plan.costOptimization.map((item) => `- ${item}`).join("\n")}`;
 }

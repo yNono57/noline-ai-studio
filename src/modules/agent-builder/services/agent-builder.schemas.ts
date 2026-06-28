@@ -137,6 +137,96 @@ const productRecommendation = object({
   actionItems: textList
 });
 
+const uxJourneyStep = object({
+  name: text,
+  userGoal: text,
+  interaction: text,
+  friction: text,
+  successSignal: text
+});
+const uxStrategy = object({
+  score,
+  summary: text,
+  designPrinciples: textList,
+  primaryJourney: { type: "array", items: uxJourneyStep },
+  onboarding: textList,
+  keyScreens: textList,
+  accessibility: textList,
+  retentionMechanisms: textList
+});
+
+const pricingTier = object({
+  name: text,
+  target: text,
+  monthlyPrice: text,
+  annualPrice: text,
+  features: textList,
+  limits: textList
+});
+const pricingStrategy = object({
+  score,
+  summary: text,
+  recommendedModel: text,
+  valueMetric: text,
+  tiers: { type: "array", items: pricingTier, minItems: 3 },
+  trialStrategy: text,
+  upsells: textList,
+  validationTests: textList,
+  keyMetrics: textList
+});
+
+const marketingChannel = object({
+  channel: text,
+  objective: text,
+  audience: text,
+  message: text,
+  actions: textList
+});
+const marketingStrategy = object({
+  score,
+  summary: text,
+  positioning: text,
+  corePromise: text,
+  channels: { type: "array", items: marketingChannel },
+  launchPlan: textList,
+  contentPillars: textList,
+  acquisitionFunnel: textList,
+  keyMetrics: textList
+});
+
+const developmentPhase = object({
+  order: { type: "integer" },
+  name: text,
+  objective: text,
+  duration: text,
+  difficulty: { type: "string", enum: ["low", "medium", "high"] },
+  deliverables: textList,
+  acceptanceCriteria: textList
+});
+const developmentPlan = object({
+  score,
+  summary: text,
+  architecture: text,
+  stackRecommendations: textList,
+  phases: { type: "array", items: developmentPhase },
+  dependencies: textList,
+  technicalRisks: textList,
+  qualityGates: textList
+});
+
+const aiImplementationPlan = object({
+  score,
+  summary: text,
+  modelStrategy: text,
+  promptArchitecture: textList,
+  dataRequirements: textList,
+  retrievalStrategy: text,
+  guardrails: textList,
+  evaluationPlan: textList,
+  observability: textList,
+  costOptimization: textList
+});
+
 const schemas: Record<AgentBuilderV2Task, JsonSchema> = {
   analyze_idea: ideaAnalysis,
   generate_business_score: businessScore,
@@ -148,7 +238,12 @@ const schemas: Record<AgentBuilderV2Task, JsonSchema> = {
       items: productRecommendation,
       minItems: 7
     }
-  })
+  }),
+  generate_ux_strategy: uxStrategy,
+  generate_pricing_strategy: pricingStrategy,
+  generate_marketing_strategy: marketingStrategy,
+  generate_development_plan: developmentPlan,
+  generate_ai_implementation_plan: aiImplementationPlan
 };
 
 export function getAgentBuilderSchema(task: AgentBuilderV2Task): JsonSchema {

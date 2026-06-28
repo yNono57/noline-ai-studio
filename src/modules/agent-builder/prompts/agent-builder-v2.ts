@@ -37,4 +37,9 @@ export type AgentBuilderV2Task =
   | "generate_business_score"
   | "generate_agent"
   | "generate_roadmap"
-  | "generate_recommendations";
+  | "generate_recommendations"
+  | "generate_ux_strategy"
+  | "generate_pricing_strategy"
+  | "generate_marketing_strategy"
+  | "generate_development_plan"
+  | "generate_ai_implementation_plan";

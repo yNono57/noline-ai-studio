@@ -169,3 +169,106 @@ export interface GenerateRecommendationsInput {
   roadmap?: AgentRoadmap;
   context?: AgentBuilderContext;
 }
+
+export interface UXJourneyStep {
+  name: string;
+  userGoal: string;
+  interaction: string;
+  friction: string;
+  successSignal: string;
+}
+
+export interface UXStrategy {
+  score: number;
+  summary: string;
+  designPrinciples: string[];
+  primaryJourney: UXJourneyStep[];
+  onboarding: string[];
+  keyScreens: string[];
+  accessibility: string[];
+  retentionMechanisms: string[];
+}
+
+export interface PricingTier {
+  name: string;
+  target: string;
+  monthlyPrice: string;
+  annualPrice: string;
+  features: string[];
+  limits: string[];
+}
+
+export interface PricingStrategy {
+  score: number;
+  summary: string;
+  recommendedModel: string;
+  valueMetric: string;
+  tiers: PricingTier[];
+  trialStrategy: string;
+  upsells: string[];
+  validationTests: string[];
+  keyMetrics: string[];
+}
+
+export interface MarketingChannel {
+  channel: string;
+  objective: string;
+  audience: string;
+  message: string;
+  actions: string[];
+}
+
+export interface MarketingStrategy {
+  score: number;
+  summary: string;
+  positioning: string;
+  corePromise: string;
+  channels: MarketingChannel[];
+  launchPlan: string[];
+  contentPillars: string[];
+  acquisitionFunnel: string[];
+  keyMetrics: string[];
+}
+
+export interface DevelopmentPhase {
+  order: number;
+  name: string;
+  objective: string;
+  duration: string;
+  difficulty: "low" | "medium" | "high";
+  deliverables: string[];
+  acceptanceCriteria: string[];
+}
+
+export interface DevelopmentPlan {
+  score: number;
+  summary: string;
+  architecture: string;
+  stackRecommendations: string[];
+  phases: DevelopmentPhase[];
+  dependencies: string[];
+  technicalRisks: string[];
+  qualityGates: string[];
+}
+
+export interface AIImplementationPlan {
+  score: number;
+  summary: string;
+  modelStrategy: string;
+  promptArchitecture: string[];
+  dataRequirements: string[];
+  retrievalStrategy: string;
+  guardrails: string[];
+  evaluationPlan: string[];
+  observability: string[];
+  costOptimization: string[];
+}
+
+export interface GenerateExpertStrategiesInput {
+  analysis: IdeaAnalysis;
+  businessScore: BusinessScore;
+  agent: GeneratedAgent;
+  roadmap: AgentRoadmap;
+  recommendations: ProductRecommendation[];
+  context?: AgentBuilderContext;
+}
