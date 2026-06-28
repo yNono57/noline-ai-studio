@@ -154,7 +154,11 @@ export async function saveAgent({
   tone,
   complexity,
   businessGoal,
-  output
+  output,
+  description,
+  targetAudience,
+  systemPrompt,
+  source
 }: {
   userId: string;
   name: string;
@@ -165,6 +169,10 @@ export async function saveAgent({
   complexity: string;
   businessGoal: string;
   output: string;
+  description?: string;
+  targetAudience?: string;
+  systemPrompt?: string;
+  source?: string;
 }) {
   const data = await supabaseAdmin("/rest/v1/agents", {
     method: "POST",
@@ -177,7 +185,11 @@ export async function saveAgent({
       tone,
       complexity,
       business_goal: businessGoal,
-      output
+      output,
+      description: description || mission,
+      target_audience: targetAudience || clientType,
+      system_prompt: systemPrompt || output,
+      source: source || "legacy"
     })
   });
 
@@ -188,6 +200,12 @@ export async function listAgents(userId: string) {
   return supabaseAdmin(
     `/rest/v1/agents?user_id=eq.${userId}&select=*&order=created_at.desc`,
     { method: "GET" }
+  );
+}
+
+export async function getAgent(userId: string, id: string) {
+  return selectFirst<Record<string, unknown>>(
+    `/rest/v1/agents?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`
   );
 }
 

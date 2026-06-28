@@ -32,6 +32,10 @@ create table if not exists public.generated_texts (
   title text not null,
   values jsonb not null default '{}'::jsonb,
   output text not null,
+  description text,
+  target_audience text,
+  system_prompt text,
+  source text not null default 'legacy',
   created_at timestamptz not null default now()
 );
 

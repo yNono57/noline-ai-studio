@@ -9,9 +9,9 @@ interface RecommendationsEnvelope {
 /**
  * Provider OpenAI du module Agent Builder.
  *
- * Les cinq expertises historiques et les cinq modules V3 passent par cette
- * frontière unique. Structured Outputs garantit que chaque réponse respecte
- * le contrat JSON propre à sa tâche avant de poursuivre le pipeline.
+ * Les expertises historiques et les modules V3/V4 passent par cette frontière
+ * unique. Structured Outputs garantit que chaque réponse respecte le contrat
+ * JSON propre à sa tâche avant de poursuivre le pipeline.
  */
 export class OpenAIAgentBuilderGateway implements AgentBuilderGateway {
   private readonly client: OpenAI;

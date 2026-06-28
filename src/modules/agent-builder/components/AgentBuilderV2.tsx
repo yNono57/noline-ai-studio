@@ -6,31 +6,57 @@ import {
   BadgeEuro,
   Bot,
   BrainCircuit,
+  ChartNoAxesCombined,
   Check,
   Clipboard,
   Code2,
   Download,
+  FileText,
+  Handshake,
+  ListChecks,
   Loader2,
   Megaphone,
+  MessageSquareText,
+  Network,
+  Paintbrush,
   Palette,
   RefreshCw,
+  Save,
+  Scale,
+  Search,
   Sparkles,
   Target,
   TrendingUp,
+  Swords,
   WandSparkles
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
+import { saveAgentLocal, type AgentInput } from "@/lib/agents";
+import {
+  getAuthHeaders,
+  isSupabaseBrowserConfigured
+} from "@/lib/supabase-client";
 import type {
   AgentRoadmap,
   AIImplementationPlan,
+  BrandingPack,
   BusinessScore,
+  CompetitorAnalysis,
   DevelopmentPlan,
+  ExecutiveSummary,
+  FinancialForecast,
   GeneratedAgent,
   IdeaAnalysis,
+  LegalCompliance,
   MarketingStrategy,
   PricingStrategy,
+  ProductBacklog,
   ProductRecommendation,
+  PromptPack,
+  SalesPack,
+  SEOStrategy,
+  TechnicalDiagrams,
   UXStrategy
 } from "../types";
 
@@ -45,6 +71,16 @@ interface AgentBuilderV2Response {
   marketingStrategy: MarketingStrategy;
   developmentPlan: DevelopmentPlan;
   aiImplementationPlan: AIImplementationPlan;
+  executiveSummary: ExecutiveSummary;
+  financialForecast: FinancialForecast;
+  competitorAnalysis: CompetitorAnalysis;
+  legalCompliance: LegalCompliance;
+  salesPack: SalesPack;
+  brandingPack: BrandingPack;
+  seoStrategy: SEOStrategy;
+  productBacklog: ProductBacklog;
+  technicalDiagrams: TechnicalDiagrams;
+  promptPack: PromptPack;
 }
 
 interface ResultCard {
@@ -67,7 +103,8 @@ const PROGRESS_STEPS = [
   "Stratégie tarifaire",
   "Plan marketing",
   "Plan de développement",
-  "Implémentation IA"
+  "Implémentation IA",
+  "Livrables projet V4"
 ];
 
 const EXAMPLE_IDEA =
@@ -81,6 +118,8 @@ export function AgentBuilderV2() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [copiedCard, setCopiedCard] = useState<string | null>(null);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
     if (!loading) return;
@@ -102,6 +141,7 @@ export function AgentBuilderV2() {
     setLoading(true);
     setProgress(0);
     setError("");
+    setSaveMessage("");
     setResult(null);
     setSubmittedIdea(normalizedIdea);
 
@@ -140,6 +180,55 @@ export function AgentBuilderV2() {
     link.download = `agent-builder-${card.id}.md`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function saveGeneratedAgent() {
+    if (!result) return;
+
+    const input: AgentInput = {
+      name: result.agent.name,
+      clientType: result.agent.targetAudience,
+      mission: result.agent.mission,
+      features: result.agent.features.join("\n"),
+      tone: result.agent.tone.join(", "),
+      complexity: result.agent.complexity,
+      businessGoal: result.agent.businessGoal,
+      output: result.agent.systemPrompt,
+      description: result.agent.description,
+      targetAudience: result.agent.targetAudience,
+      systemPrompt: result.agent.systemPrompt,
+      source: "agent-builder-v3"
+    };
+
+    setSavingAgent(true);
+    setSaveMessage("");
+    setError("");
+
+    try {
+      if (!isSupabaseBrowserConfigured()) {
+        saveAgentLocal(input);
+        setSaveMessage("Agent sauvegardé dans votre bibliothèque locale.");
+        return;
+      }
+
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(input)
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "La sauvegarde de l’agent a échoué.");
+      }
+      setSaveMessage("Agent sauvegardé. Il est maintenant disponible dans votre bibliothèque.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Impossible de sauvegarder cet agent.");
+    } finally {
+      setSavingAgent(false);
+    }
   }
 
   const cards = result ? buildResultCards(result) : [];
@@ -238,18 +327,40 @@ export function AgentBuilderV2() {
                 <h2 className="mt-1 text-xl font-black text-white">{result.agent.name}</h2>
                 <p className="mt-1 max-w-2xl text-sm text-noline-muted">{submittedIdea}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setResult(null);
-                  setError("");
-                }}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:border-noline-orange hover:text-noline-orange"
-              >
-                <Sparkles className="h-4 w-4" />
-                Nouvelle idée
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveGeneratedAgent()}
+                  disabled={savingAgent}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-noline-orange px-4 py-2.5 text-sm font-black text-noline-black transition hover:bg-white disabled:opacity-60"
+                >
+                  {savingAgent ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {savingAgent ? "Sauvegarde..." : "Sauvegarder l’agent"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResult(null);
+                    setError("");
+                    setSaveMessage("");
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:border-noline-orange hover:text-noline-orange"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Nouvelle idée
+                </button>
+              </div>
             </div>
+
+            {saveMessage ? (
+              <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
+                {saveMessage}
+              </div>
+            ) : null}
 
             {error ? <ErrorMessage message={error} /> : null}
 
@@ -492,6 +603,206 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
       icon: BrainCircuit,
       content: aiImplementationMarkdown(result.aiImplementationPlan),
       render: <AIImplementationContent plan={result.aiImplementationPlan} />
+    },
+    {
+      id: "executiveSummary",
+      eyebrow: "Livrable V4 · Direction",
+      title: "Executive Summary",
+      description: "La synthèse décisionnelle du projet.",
+      icon: FileText,
+      content: v4Markdown("Executive Summary", result.executiveSummary),
+      render: (
+        <V4Content
+          score={result.executiveSummary.score}
+          summary={result.executiveSummary.summary}
+          sections={[
+            ["Vision", [result.executiveSummary.vision]],
+            ["Opportunité", [result.executiveSummary.opportunity]],
+            ["Priorités", result.executiveSummary.priorities],
+            ["Prochaines étapes", result.executiveSummary.nextSteps]
+          ]}
+        />
+      )
+    },
+    {
+      id: "financialForecast",
+      eyebrow: "Livrable V4 · Finance",
+      title: "Financial Forecast",
+      description: "Les hypothèses financières et scénarios à valider.",
+      icon: ChartNoAxesCombined,
+      content: v4Markdown("Financial Forecast", result.financialForecast),
+      render: (
+        <V4Content
+          score={result.financialForecast.score}
+          summary={result.financialForecast.summary}
+          sections={[
+            ["Hypothèses", result.financialForecast.assumptions],
+            ["Scénarios", result.financialForecast.scenarios.map((item) => `${item.year} — cible ${item.targetRevenue}`)],
+            ["Coûts", result.financialForecast.costDrivers],
+            ["Avertissement", [result.financialForecast.disclaimer]]
+          ]}
+        />
+      )
+    },
+    {
+      id: "competitorAnalysis",
+      eyebrow: "Livrable V4 · Marché",
+      title: "Competitor Analysis",
+      description: "Le paysage concurrentiel et les espaces de différenciation.",
+      icon: Swords,
+      content: v4Markdown("Competitor Analysis", result.competitorAnalysis),
+      render: (
+        <V4Content
+          score={result.competitorAnalysis.score}
+          summary={result.competitorAnalysis.summary}
+          sections={[
+            ["Position", [result.competitorAnalysis.marketPosition]],
+            ["Concurrents", result.competitorAnalysis.competitors.map((item) => `${item.name} — ${item.positioning}`)],
+            ["Différenciation", result.competitorAnalysis.differentiationOpportunities]
+          ]}
+        />
+      )
+    },
+    {
+      id: "legalCompliance",
+      eyebrow: "Livrable V4 · Conformité",
+      title: "Legal & Compliance",
+      description: "Les obligations probables et actions de réduction des risques.",
+      icon: Scale,
+      content: v4Markdown("Legal & Compliance", result.legalCompliance),
+      render: (
+        <V4Content
+          score={result.legalCompliance.score}
+          summary={result.legalCompliance.summary}
+          sections={[
+            ["Niveau de risque", [result.legalCompliance.riskLevel]],
+            ["Obligations", result.legalCompliance.obligations],
+            ["Risques", result.legalCompliance.keyRisks],
+            ["Actions", result.legalCompliance.requiredActions],
+            ["Avertissement", [result.legalCompliance.disclaimer]]
+          ]}
+        />
+      )
+    },
+    {
+      id: "salesPack",
+      eyebrow: "Livrable V4 · Vente",
+      title: "Sales Pack",
+      description: "Le discours et les outils du cycle commercial.",
+      icon: Handshake,
+      content: v4Markdown("Sales Pack", result.salesPack),
+      render: (
+        <V4Content
+          score={result.salesPack.score}
+          summary={result.salesPack.summary}
+          sections={[
+            ["Pitch", [result.salesPack.elevatorPitch]],
+            ["Valeur", result.salesPack.valuePropositions],
+            ["Questions", result.salesPack.discoveryQuestions],
+            ["Closing", result.salesPack.closingSequence]
+          ]}
+        />
+      )
+    },
+    {
+      id: "brandingPack",
+      eyebrow: "Livrable V4 · Marque",
+      title: "Branding Pack",
+      description: "Le territoire de marque et ses premières expressions.",
+      icon: Paintbrush,
+      content: v4Markdown("Branding Pack", result.brandingPack),
+      render: (
+        <V4Content
+          score={result.brandingPack.score}
+          summary={result.brandingPack.summary}
+          sections={[
+            ["Positionnement", [result.brandingPack.brandPositioning]],
+            ["Personnalité", result.brandingPack.personality],
+            ["Noms", result.brandingPack.nameIdeas],
+            ["Signatures", result.brandingPack.taglines],
+            ["Direction visuelle", result.brandingPack.visualDirection]
+          ]}
+        />
+      )
+    },
+    {
+      id: "seoStrategy",
+      eyebrow: "Livrable V4 · Acquisition",
+      title: "SEO Strategy",
+      description: "Les intentions de recherche et priorités organiques.",
+      icon: Search,
+      content: v4Markdown("SEO Strategy", result.seoStrategy),
+      render: (
+        <V4Content
+          score={result.seoStrategy.score}
+          summary={result.seoStrategy.summary}
+          sections={[
+            ["Mots-clés", result.seoStrategy.keywords.map((item) => `${item.keyword} — ${item.intent}`)],
+            ["Piliers", result.seoStrategy.contentPillars],
+            ["Pages", result.seoStrategy.priorityPages],
+            ["Technique", result.seoStrategy.technicalActions]
+          ]}
+        />
+      )
+    },
+    {
+      id: "productBacklog",
+      eyebrow: "Livrable V4 · Produit",
+      title: "Product Backlog",
+      description: "Les epics et critères de livraison prioritaires.",
+      icon: ListChecks,
+      content: v4Markdown("Product Backlog", result.productBacklog),
+      render: (
+        <V4Content
+          score={result.productBacklog.score}
+          summary={result.productBacklog.summary}
+          sections={[
+            ["Epics", result.productBacklog.epics.map((item) => `${item.name} — ${item.goal}`)],
+            ["Definition of Done", result.productBacklog.definitionOfDone],
+            ["Critères de release", result.productBacklog.releaseCriteria]
+          ]}
+        />
+      )
+    },
+    {
+      id: "technicalDiagrams",
+      eyebrow: "Livrable V4 · Architecture",
+      title: "Technical Diagrams",
+      description: "Les vues Mermaid de l’architecture et des flux.",
+      icon: Network,
+      content: v4Markdown("Technical Diagrams", result.technicalDiagrams),
+      render: (
+        <V4Content
+          score={result.technicalDiagrams.score}
+          summary={result.technicalDiagrams.summary}
+          sections={[
+            ["Architecture Mermaid", [result.technicalDiagrams.architectureDiagram]],
+            ["Flux Mermaid", [result.technicalDiagrams.dataFlowDiagram]],
+            ["Composants", result.technicalDiagrams.components],
+            ["Notes", result.technicalDiagrams.implementationNotes]
+          ]}
+          codeSections
+        />
+      )
+    },
+    {
+      id: "promptPack",
+      eyebrow: "Livrable V4 · Prompts",
+      title: "Prompt Pack",
+      description: "Les prompts prêts à adapter aux cas d’usage clés.",
+      icon: MessageSquareText,
+      content: v4Markdown("Prompt Pack", result.promptPack),
+      render: (
+        <V4Content
+          score={result.promptPack.score}
+          summary={result.promptPack.summary}
+          sections={[
+            ["Prompts", result.promptPack.prompts.map((item) => `${item.name} — ${item.purpose}\n${item.systemPrompt}`)],
+            ["Usage", result.promptPack.usageGuidelines],
+            ["Évaluation", result.promptPack.evaluationCriteria]
+          ]}
+        />
+      )
     }
   ];
 }
@@ -632,6 +943,55 @@ function StrategyHeader({ score, summary }: { score: number; summary: string }) 
         <span className="text-[10px] font-black uppercase text-noline-muted">sur 100</span>
       </div>
       <p className="text-sm leading-6 text-white">{summary}</p>
+    </div>
+  );
+}
+
+function V4Content({
+  score,
+  summary,
+  sections,
+  codeSections = false
+}: {
+  score: number;
+  summary: string;
+  sections: Array<[string, string[]]>;
+  codeSections?: boolean;
+}) {
+  return (
+    <div>
+      <StrategyHeader score={score} summary={summary} />
+      <details className="group rounded-lg border border-white/10 bg-noline-black/40">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-black text-white marker:hidden">
+          <span className="inline-flex items-center gap-2">
+            <span className="text-noline-orange transition group-open:rotate-90">›</span>
+            Afficher le livrable détaillé
+          </span>
+        </summary>
+        <div className="space-y-5 border-t border-white/10 p-4">
+          {sections.map(([title, values]) => (
+            <div key={title}>
+              <p className="mb-2 text-xs font-black uppercase tracking-[0.15em] text-noline-orange">
+                {title}
+              </p>
+              {codeSections ? (
+                values.map((value) => (
+                  <pre
+                    key={value}
+                    className="mb-2 overflow-x-auto whitespace-pre-wrap rounded-md bg-black/30 p-3 text-xs leading-5 text-white"
+                  >
+                    {value}
+                  </pre>
+                ))
+              ) : (
+                <ul className="space-y-2 text-sm leading-6 text-noline-muted">
+                  {values.map((value) => <li key={value}>— {value}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -984,4 +1344,44 @@ ${plan.observability.map((item) => `- ${item}`).join("\n")}
 
 ## Optimisation des coûts
 ${plan.costOptimization.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function v4Markdown(title: string, value: object) {
+  return `# ${title}
+
+${formatMarkdownObject(value)}`;
+}
+
+function formatMarkdownObject(value: object, depth = 2): string {
+  return Object.entries(value)
+    .map(([key, item]) => {
+      const heading = `${"#".repeat(depth)} ${humanizeKey(key)}`;
+
+      if (Array.isArray(item)) {
+        if (item.every((entry) => typeof entry !== "object" || entry === null)) {
+          return `${heading}\n${item.map((entry) => `- ${String(entry)}`).join("\n")}`;
+        }
+
+        return `${heading}\n${item
+          .map((entry, index) =>
+            typeof entry === "object" && entry !== null
+              ? `\n${"#".repeat(depth + 1)} Élément ${index + 1}\n${formatMarkdownObject(entry, depth + 2)}`
+              : `- ${String(entry)}`
+          )
+          .join("\n")}`;
+      }
+
+      if (typeof item === "object" && item !== null) {
+        return `${heading}\n${formatMarkdownObject(item, depth + 1)}`;
+      }
+
+      return `${heading}\n${String(item)}`;
+    })
+    .join("\n\n");
+}
+
+function humanizeKey(key: string) {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (letter) => letter.toUpperCase());
 }

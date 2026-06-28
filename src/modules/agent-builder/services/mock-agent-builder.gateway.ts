@@ -2,13 +2,23 @@ import type { AgentBuilderGateway, AgentBuilderRequest } from "./agent-builder.s
 import type {
   AgentRoadmap,
   AIImplementationPlan,
+  BrandingPack,
   BusinessScore,
+  CompetitorAnalysis,
   DevelopmentPlan,
+  ExecutiveSummary,
+  FinancialForecast,
   GeneratedAgent,
   IdeaAnalysis,
+  LegalCompliance,
   MarketingStrategy,
   PricingStrategy,
+  ProductBacklog,
   ProductRecommendation,
+  PromptPack,
+  SalesPack,
+  SEOStrategy,
+  TechnicalDiagrams,
   UXStrategy
 } from "../types";
 
@@ -37,8 +47,176 @@ export class MockAgentBuilderGateway implements AgentBuilderGateway {
         return asResult<TResult>(mockDevelopmentPlan());
       case "generate_ai_implementation_plan":
         return asResult<TResult>(mockAIImplementationPlan());
+      case "generate_executive_summary":
+        return asResult<TResult>(mockExecutiveSummary());
+      case "generate_financial_forecast":
+        return asResult<TResult>(mockFinancialForecast());
+      case "generate_competitor_analysis":
+        return asResult<TResult>(mockCompetitorAnalysis());
+      case "generate_legal_compliance":
+        return asResult<TResult>(mockLegalCompliance());
+      case "generate_sales_pack":
+        return asResult<TResult>(mockSalesPack());
+      case "generate_branding_pack":
+        return asResult<TResult>(mockBrandingPack());
+      case "generate_seo_strategy":
+        return asResult<TResult>(mockSEOStrategy());
+      case "generate_product_backlog":
+        return asResult<TResult>(mockProductBacklog());
+      case "generate_technical_diagrams":
+        return asResult<TResult>(mockTechnicalDiagrams());
+      case "generate_prompt_pack":
+        return asResult<TResult>(mockPromptPack());
     }
   }
+}
+
+function mockExecutiveSummary(): ExecutiveSummary {
+  return {
+    score: 84,
+    summary: "Un produit IA vertical qui transforme un besoin métier en livrable contrôlable.",
+    vision: "Devenir le copilote opérationnel de référence du segment.",
+    opportunity: "Monétiser un gain de temps récurrent avec une offre spécialisée.",
+    keyFindings: ["Besoin identifiable", "MVP réalisable", "Différenciation à prouver"],
+    priorities: ["Valider la cible", "Mesurer le temps gagné", "Signer des pilotes"],
+    nextSteps: ["Interroger cinq prospects", "Tester le workflow principal"]
+  };
+}
+
+function mockFinancialForecast(): FinancialForecast {
+  return {
+    score: 70,
+    summary: "Projection indicative fondée sur une montée progressive des abonnements.",
+    assumptions: ["Prix moyen de 129 € HT", "Acquisition progressive", "Churn à mesurer"],
+    scenarios: ["Année 1", "Année 2", "Année 3"].map((year, index) => ({
+      year,
+      conservativeRevenue: `${15 + index * 25} k€`,
+      targetRevenue: `${30 + index * 55} k€`,
+      ambitiousRevenue: `${60 + index * 100} k€`
+    })),
+    costDrivers: ["API IA", "Développement", "Acquisition", "Support"],
+    breakEvenHypothesis: "À estimer après validation du coût d'acquisition et de la marge réelle.",
+    keyMetrics: ["MRR", "Marge brute", "CAC", "LTV", "Churn"],
+    disclaimer: "Hypothèses indicatives, à valider avec un professionnel financier."
+  };
+}
+
+function mockCompetitorAnalysis(): CompetitorAnalysis {
+  return {
+    score: 76,
+    summary: "La concurrence combine assistants généralistes et logiciels métier.",
+    marketPosition: "Spécialiste vertical centré sur des livrables immédiatement exploitables.",
+    competitors: [
+      {
+        name: "Assistants IA généralistes",
+        positioning: "Productivité polyvalente",
+        strengths: ["Notoriété", "Large couverture"],
+        weaknesses: ["Peu de contexte métier", "Configuration nécessaire"]
+      }
+    ],
+    differentiationOpportunities: ["Workflows propriétaires", "Preuves de ROI", "Intégrations ciblées"],
+    monitoringActions: ["Comparer les prix chaque trimestre", "Suivre les nouvelles fonctions"]
+  };
+}
+
+function mockLegalCompliance(): LegalCompliance {
+  return {
+    score: 68,
+    summary: "Le projet doit cadrer données personnelles, transparence IA et responsabilité.",
+    riskLevel: "medium",
+    obligations: ["Information des utilisateurs", "Base légale des traitements", "Gestion des droits"],
+    keyRisks: ["Données sensibles dans les prompts", "Sorties erronées utilisées sans validation"],
+    requiredActions: ["Cartographier les données", "Définir une politique de conservation", "Valider les CGU"],
+    disclaimer: "Cette synthèse ne remplace pas un avis juridique adapté au pays et au cas d'usage."
+  };
+}
+
+function mockSalesPack(): SalesPack {
+  return {
+    score: 82,
+    summary: "Un discours commercial centré sur le résultat et la preuve de valeur.",
+    elevatorPitch: "Transformez vos tâches répétitives en livrables prêts à valider en quelques minutes.",
+    valuePropositions: ["Temps économisé", "Méthode homogène", "Expertise disponible à la demande"],
+    discoveryQuestions: ["Quelle tâche ralentit le plus votre équipe ?", "Comment mesurez-vous sa qualité ?"],
+    objectionHandling: [
+      { objection: "L'IA fait des erreurs.", response: "Chaque sortie reste contrôlable et validée humainement." }
+    ],
+    closingSequence: ["Démonstration", "Pilote sur un cas", "Bilan chiffré", "Abonnement"]
+  };
+}
+
+function mockBrandingPack(): BrandingPack {
+  return {
+    score: 80,
+    summary: "Une marque experte, accessible et orientée action.",
+    brandPositioning: "Le copilote métier qui transforme l'IA en résultat concret.",
+    personality: ["Pragmatique", "Rassurante", "Experte"],
+    nameIdeas: ["Noline Copilot", "AgentFlow", "Métier AI"],
+    taglines: ["Votre expertise, accélérée.", "De l'idée au résultat."],
+    visualDirection: ["Contraste premium", "Signalétique claire", "Accent énergique"],
+    voiceGuidelines: ["Phrases courtes", "Preuves avant promesses", "Jargon limité"]
+  };
+}
+
+function mockSEOStrategy(): SEOStrategy {
+  return {
+    score: 72,
+    summary: "Une stratégie longue traîne centrée sur les problèmes métier.",
+    keywords: [
+      { keyword: "agent IA métier", intent: "Solution", priority: "high" },
+      { keyword: "automatiser tâche métier", intent: "Information", priority: "medium" }
+    ],
+    contentPillars: ["Cas d'usage", "Automatisation", "ROI"],
+    priorityPages: ["Page secteur", "Page cas d'usage", "Comparatif"],
+    technicalActions: ["Métadonnées", "Données structurées", "Performance"],
+    keyMetrics: ["Impressions", "Positions", "Conversions organiques"]
+  };
+}
+
+function mockProductBacklog(): ProductBacklog {
+  return {
+    score: 85,
+    summary: "Un backlog priorisé autour de l'activation et de la valeur mesurable.",
+    epics: [
+      {
+        name: "Premier résultat",
+        goal: "Activer un utilisateur en moins de dix minutes.",
+        priority: "high",
+        stories: ["Créer un brief guidé", "Prévisualiser la sortie", "Corriger avant validation"]
+      }
+    ],
+    definitionOfDone: ["Testé", "Accessible", "Mesuré", "Documenté"],
+    releaseCriteria: ["Aucun blocage critique", "Parcours principal validé"]
+  };
+}
+
+function mockTechnicalDiagrams(): TechnicalDiagrams {
+  return {
+    score: 86,
+    summary: "Une architecture modulaire séparant interface, orchestration, IA et données.",
+    architectureDiagram: "flowchart LR\nUI[Interface] --> API[API]\nAPI --> AI[OpenAI]\nAPI --> DB[(Supabase)]",
+    dataFlowDiagram: "sequenceDiagram\nUser->>API: Brief\nAPI->>AI: Prompt structuré\nAI-->>API: JSON\nAPI-->>User: Résultat",
+    components: ["Interface Next.js", "Service Agent Builder", "Gateway OpenAI", "Supabase"],
+    implementationNotes: ["Valider les schémas", "Journaliser sans données sensibles"]
+  };
+}
+
+function mockPromptPack(): PromptPack {
+  return {
+    score: 88,
+    summary: "Un pack initial couvrant qualification, production et contrôle qualité.",
+    prompts: [
+      {
+        name: "Qualification du besoin",
+        purpose: "Transformer un brief flou en demande exploitable.",
+        systemPrompt: "Tu es un consultant métier. Clarifie sans inventer.",
+        userTemplate: "Objectif: {{objective}}\nContexte: {{context}}",
+        variables: ["objective", "context"]
+      }
+    ],
+    usageGuidelines: ["Versionner les prompts", "Limiter le contexte", "Valider les sorties"],
+    evaluationCriteria: ["Exactitude", "Utilité", "Conformité au format"]
+  };
 }
 
 function mockUXStrategy(): UXStrategy {

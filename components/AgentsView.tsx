@@ -5,23 +5,15 @@ import Link from "next/link";
 import { Bot, Play, Plus, Trash2 } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { FavoriteButton } from "@/components/FavoriteButton";
-import { deleteAgentLocal, readAgents, type AgentRecord } from "@/lib/agents";
+import {
+  deleteAgentLocal,
+  normalizeAgentRow,
+  readAgents,
+  type AgentRecord,
+  type ApiAgentRow
+} from "@/lib/agents";
 import { officialAgents } from "@/lib/official-agents";
 import { getAuthHeaders, isSupabaseBrowserConfigured } from "@/lib/supabase-client";
-
-type ApiAgent = {
-  id: string;
-  user_id?: string | null;
-  name: string;
-  client_type: string;
-  mission: string;
-  features: string;
-  tone: string;
-  complexity: string;
-  business_goal: string;
-  output: string;
-  created_at: string;
-};
 
 export function AgentsView() {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
@@ -39,9 +31,9 @@ export function AgentsView() {
 
     try {
       const response = await fetch("/api/agents", { headers: getAuthHeaders() });
-      const data = (await response.json()) as { agents?: ApiAgent[]; error?: string };
+      const data = (await response.json()) as { agents?: ApiAgentRow[]; error?: string };
       if (!response.ok || !data.agents) throw new Error(data.error || "Chargement impossible.");
-      setAgents(data.agents.map(normalizeAgent));
+      setAgents(data.agents.map(normalizeAgentRow));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Une erreur est survenue.");
       setAgents(readAgents());
@@ -180,20 +172,4 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
       </span>
     </div>
   );
-}
-
-function normalizeAgent(item: ApiAgent): AgentRecord {
-  return {
-    id: item.id,
-    userId: item.user_id,
-    name: item.name,
-    clientType: item.client_type,
-    mission: item.mission,
-    features: item.features,
-    tone: item.tone,
-    complexity: item.complexity,
-    businessGoal: item.business_goal,
-    output: item.output,
-    createdAt: item.created_at
-  };
 }

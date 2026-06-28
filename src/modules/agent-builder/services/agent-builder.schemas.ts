@@ -227,6 +227,123 @@ const aiImplementationPlan = object({
   costOptimization: textList
 });
 
+const executiveSummary = object({
+  score,
+  summary: text,
+  vision: text,
+  opportunity: text,
+  keyFindings: textList,
+  priorities: textList,
+  nextSteps: textList
+});
+const financialScenario = object({
+  year: text,
+  conservativeRevenue: text,
+  targetRevenue: text,
+  ambitiousRevenue: text
+});
+const financialForecast = object({
+  score,
+  summary: text,
+  assumptions: textList,
+  scenarios: { type: "array", items: financialScenario, minItems: 3, maxItems: 3 },
+  costDrivers: textList,
+  breakEvenHypothesis: text,
+  keyMetrics: textList,
+  disclaimer: text
+});
+const competitorProfile = object({
+  name: text,
+  positioning: text,
+  strengths: textList,
+  weaknesses: textList
+});
+const competitorAnalysis = object({
+  score,
+  summary: text,
+  marketPosition: text,
+  competitors: { type: "array", items: competitorProfile },
+  differentiationOpportunities: textList,
+  monitoringActions: textList
+});
+const legalCompliance = object({
+  score,
+  summary: text,
+  riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+  obligations: textList,
+  keyRisks: textList,
+  requiredActions: textList,
+  disclaimer: text
+});
+const salesPack = object({
+  score,
+  summary: text,
+  elevatorPitch: text,
+  valuePropositions: textList,
+  discoveryQuestions: textList,
+  objectionHandling: { type: "array", items: objection },
+  closingSequence: textList
+});
+const brandingPack = object({
+  score,
+  summary: text,
+  brandPositioning: text,
+  personality: textList,
+  nameIdeas: textList,
+  taglines: textList,
+  visualDirection: textList,
+  voiceGuidelines: textList
+});
+const seoKeyword = object({
+  keyword: text,
+  intent: text,
+  priority: { type: "string", enum: ["low", "medium", "high"] }
+});
+const seoStrategy = object({
+  score,
+  summary: text,
+  keywords: { type: "array", items: seoKeyword },
+  contentPillars: textList,
+  priorityPages: textList,
+  technicalActions: textList,
+  keyMetrics: textList
+});
+const productEpic = object({
+  name: text,
+  goal: text,
+  priority: { type: "string", enum: ["low", "medium", "high"] },
+  stories: textList
+});
+const productBacklog = object({
+  score,
+  summary: text,
+  epics: { type: "array", items: productEpic },
+  definitionOfDone: textList,
+  releaseCriteria: textList
+});
+const technicalDiagrams = object({
+  score,
+  summary: text,
+  architectureDiagram: text,
+  dataFlowDiagram: text,
+  components: textList,
+  implementationNotes: textList
+});
+const promptTemplate = object({
+  name: text,
+  purpose: text,
+  systemPrompt: text,
+  userTemplate: text,
+  variables: textList
+});
+const promptPack = object({
+  score,
+  summary: text,
+  prompts: { type: "array", items: promptTemplate },
+  usageGuidelines: textList,
+  evaluationCriteria: textList
+});
+
 const schemas: Record<AgentBuilderV2Task, JsonSchema> = {
   analyze_idea: ideaAnalysis,
   generate_business_score: businessScore,
@@ -243,7 +360,17 @@ const schemas: Record<AgentBuilderV2Task, JsonSchema> = {
   generate_pricing_strategy: pricingStrategy,
   generate_marketing_strategy: marketingStrategy,
   generate_development_plan: developmentPlan,
-  generate_ai_implementation_plan: aiImplementationPlan
+  generate_ai_implementation_plan: aiImplementationPlan,
+  generate_executive_summary: executiveSummary,
+  generate_financial_forecast: financialForecast,
+  generate_competitor_analysis: competitorAnalysis,
+  generate_legal_compliance: legalCompliance,
+  generate_sales_pack: salesPack,
+  generate_branding_pack: brandingPack,
+  generate_seo_strategy: seoStrategy,
+  generate_product_backlog: productBacklog,
+  generate_technical_diagrams: technicalDiagrams,
+  generate_prompt_pack: promptPack
 };
 
 export function getAgentBuilderSchema(task: AgentBuilderV2Task): JsonSchema {

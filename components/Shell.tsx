@@ -42,11 +42,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
-      <aside className="sticky top-0 z-40 hidden h-screen border-r border-white/10 bg-noline-black/92 p-4 backdrop-blur-xl lg:block">
-        <Link href="/" aria-label="Accueil NOLINE AI STUDIO">
+      <aside className="sticky top-0 z-40 hidden h-dvh min-h-0 flex-col border-r border-white/10 bg-noline-black/92 p-4 backdrop-blur-xl lg:flex">
+        <Link href="/" aria-label="Accueil NOLINE AI STUDIO" className="shrink-0">
           <Brand />
         </Link>
-        <nav className="mt-8 space-y-1">
+        <nav className="mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
@@ -67,7 +67,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-        <div className="absolute bottom-4 left-4 right-4 rounded-lg border border-noline-orange/40 bg-noline-orange/10 p-4">
+        <div className="mt-4 shrink-0 rounded-lg border border-noline-orange/40 bg-noline-orange/10 p-4">
           <BriefcaseBusiness className="h-5 w-5 text-noline-orange" />
           <p className="mt-3 text-sm font-black text-white">NOLINE Pro</p>
           <p className="mt-1 text-xs leading-5 text-noline-muted">

@@ -1,25 +1,36 @@
 import {
   AGENT_BUILDER_V2_SYSTEM_PROMPT,
   AGENT_BUILDER_V3_PROMPTS,
+  AGENT_BUILDER_V4_PROMPTS,
   type AgentBuilderV2Task
 } from "../prompts";
 import type {
   AgentRoadmap,
   AIImplementationPlan,
   AnalyzeIdeaInput,
+  BrandingPack,
   BusinessScore,
+  CompetitorAnalysis,
   DevelopmentPlan,
+  ExecutiveSummary,
+  FinancialForecast,
   GenerateAgentInput,
   GenerateBusinessScoreInput,
   GeneratedAgent,
   GenerateRecommendationsInput,
   GenerateRoadmapInput,
   GenerateExpertStrategiesInput,
+  GenerateProjectDeliverablesInput,
   IdeaAnalysis,
+  LegalCompliance,
   MarketingStrategy,
   PricingStrategy,
-  ProductRecommendation
-  ,
+  ProductBacklog,
+  ProductRecommendation,
+  PromptPack,
+  SalesPack,
+  SEOStrategy,
+  TechnicalDiagrams,
   UXStrategy
 } from "../types";
 
@@ -116,6 +127,86 @@ export class AgentBuilderService {
     );
   }
 
+  generateExecutiveSummary(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<ExecutiveSummary> {
+    return this.run<ExecutiveSummary>(
+      "generate_executive_summary",
+      input,
+      "ExecutiveSummary"
+    );
+  }
+
+  generateFinancialForecast(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<FinancialForecast> {
+    return this.run<FinancialForecast>(
+      "generate_financial_forecast",
+      input,
+      "FinancialForecast"
+    );
+  }
+
+  generateCompetitorAnalysis(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<CompetitorAnalysis> {
+    return this.run<CompetitorAnalysis>(
+      "generate_competitor_analysis",
+      input,
+      "CompetitorAnalysis"
+    );
+  }
+
+  generateLegalCompliance(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<LegalCompliance> {
+    return this.run<LegalCompliance>(
+      "generate_legal_compliance",
+      input,
+      "LegalCompliance"
+    );
+  }
+
+  generateSalesPack(input: GenerateProjectDeliverablesInput): Promise<SalesPack> {
+    return this.run<SalesPack>("generate_sales_pack", input, "SalesPack");
+  }
+
+  generateBrandingPack(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<BrandingPack> {
+    return this.run<BrandingPack>("generate_branding_pack", input, "BrandingPack");
+  }
+
+  generateSEOStrategy(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<SEOStrategy> {
+    return this.run<SEOStrategy>("generate_seo_strategy", input, "SEOStrategy");
+  }
+
+  generateProductBacklog(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<ProductBacklog> {
+    return this.run<ProductBacklog>(
+      "generate_product_backlog",
+      input,
+      "ProductBacklog"
+    );
+  }
+
+  generateTechnicalDiagrams(
+    input: GenerateProjectDeliverablesInput
+  ): Promise<TechnicalDiagrams> {
+    return this.run<TechnicalDiagrams>(
+      "generate_technical_diagrams",
+      input,
+      "TechnicalDiagrams"
+    );
+  }
+
+  generatePromptPack(input: GenerateProjectDeliverablesInput): Promise<PromptPack> {
+    return this.run<PromptPack>("generate_prompt_pack", input, "PromptPack");
+  }
+
   private run<TResult>(
     task: AgentBuilderV2Task,
     input: object,
@@ -123,7 +214,9 @@ export class AgentBuilderService {
   ): Promise<TResult> {
     return this.gateway.generate<TResult>({
       systemPrompt:
-        AGENT_BUILDER_V3_PROMPTS[task] || AGENT_BUILDER_V2_SYSTEM_PROMPT,
+        AGENT_BUILDER_V4_PROMPTS[task] ||
+        AGENT_BUILDER_V3_PROMPTS[task] ||
+        AGENT_BUILDER_V2_SYSTEM_PROMPT,
       task,
       userPrompt: JSON.stringify({
         task,

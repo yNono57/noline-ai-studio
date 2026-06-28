@@ -5,10 +5,19 @@ import Link from "next/link";
 import { Bot, Copy, Loader2, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { FavoriteButton } from "@/components/FavoriteButton";
-import { readAgents, type AgentRecord } from "@/lib/agents";
+import {
+  normalizeAgentRow,
+  readAgents,
+  type AgentRecord,
+  type ApiAgentRow
+} from "@/lib/agents";
 import { readClients, type AgencyClient } from "@/lib/agency";
 import { readHistory, saveRecord } from "@/lib/history";
 import type { OfficialAgent } from "@/lib/official-agents";
+import {
+  getAuthHeaders,
+  isSupabaseBrowserConfigured
+} from "@/lib/supabase-client";
 
 export function AgentDetailView({
   officialAgent,
@@ -24,10 +33,42 @@ export function AgentDetailView({
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resolvingAgent, setResolvingAgent] = useState(Boolean(customAgentId));
 
   useEffect(() => {
     setClients(readClients());
-    if (customAgentId) setCustomAgent(readAgents().find((agent) => agent.id === customAgentId) || null);
+    if (!customAgentId) {
+      setResolvingAgent(false);
+      return;
+    }
+    const agentId = customAgentId;
+
+    async function loadCustomAgent() {
+      try {
+        if (!isSupabaseBrowserConfigured()) {
+          setCustomAgent(readAgents().find((item) => item.id === agentId) || null);
+          return;
+        }
+
+        const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
+          headers: getAuthHeaders()
+        });
+        const data = (await response.json()) as {
+          agent?: ApiAgentRow;
+          error?: string;
+        };
+        if (!response.ok || !data.agent) {
+          throw new Error(data.error || "Agent introuvable.");
+        }
+        setCustomAgent(normalizeAgentRow(data.agent));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Impossible de charger cet agent.");
+      } finally {
+        setResolvingAgent(false);
+      }
+    }
+
+    void loadCustomAgent();
   }, [customAgentId]);
 
   const agent = officialAgent;
@@ -39,10 +80,19 @@ export function AgentDetailView({
     [agent?.id, customAgent?.id, output]
   );
 
+  if (resolvingAgent) {
+    return (
+      <div className="surface premium-border flex items-center justify-center gap-3 rounded-xl p-8">
+        <Loader2 className="h-5 w-5 animate-spin text-noline-orange" />
+        <p className="font-black text-white">Chargement de l’agent...</p>
+      </div>
+    );
+  }
+
   if (!agent && !customAgent) {
     return (
       <div className="surface premium-border rounded-xl p-8 text-center">
-        <p className="text-xl font-black text-white">Agent introuvable</p>
+        <p className="text-xl font-black text-white">{error || "Agent introuvable"}</p>
         <Link href="/agents" className="mt-4 inline-flex text-sm font-black text-noline-orange">
           Retour aux agents
         </Link>
@@ -51,8 +101,8 @@ export function AgentDetailView({
   }
 
   const name = agent?.name || customAgent?.name || "";
-  const prompt = agent?.systemPrompt || customAgent?.output || "";
-  const description = agent?.description || customAgent?.mission || "";
+  const prompt = agent?.systemPrompt || customAgent?.systemPrompt || customAgent?.output || "";
+  const description = agent?.description || customAgent?.description || customAgent?.mission || "";
   const tones = agent?.tones || customAgent?.tone.split(",").map((tone) => tone.trim()) || [];
 
   async function generate(event: React.FormEvent<HTMLFormElement>) {

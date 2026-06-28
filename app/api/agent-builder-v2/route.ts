@@ -7,13 +7,23 @@ import {
 import type {
   AgentRoadmap,
   AIImplementationPlan,
+  BrandingPack,
   BusinessScore,
+  CompetitorAnalysis,
   DevelopmentPlan,
+  ExecutiveSummary,
+  FinancialForecast,
   GeneratedAgent,
   IdeaAnalysis,
+  LegalCompliance,
   MarketingStrategy,
   PricingStrategy,
+  ProductBacklog,
   ProductRecommendation,
+  PromptPack,
+  SalesPack,
+  SEOStrategy,
+  TechnicalDiagrams,
   UXStrategy
 } from "@/src/modules/agent-builder/types";
 
@@ -28,6 +38,16 @@ interface AgentBuilderV2Response {
   marketingStrategy: MarketingStrategy;
   developmentPlan: DevelopmentPlan;
   aiImplementationPlan: AIImplementationPlan;
+  executiveSummary: ExecutiveSummary;
+  financialForecast: FinancialForecast;
+  competitorAnalysis: CompetitorAnalysis;
+  legalCompliance: LegalCompliance;
+  salesPack: SalesPack;
+  brandingPack: BrandingPack;
+  seoStrategy: SEOStrategy;
+  productBacklog: ProductBacklog;
+  technicalDiagrams: TechnicalDiagrams;
+  promptPack: PromptPack;
 }
 
 const MAX_IDEA_LENGTH = 2_000;
@@ -82,6 +102,37 @@ export async function POST(request: Request) {
       service.generateDevelopmentPlan(expertInput),
       service.generateAIImplementationPlan(expertInput)
     ]);
+    const deliverablesInput = {
+      ...expertInput,
+      uxStrategy,
+      pricingStrategy,
+      marketingStrategy,
+      developmentPlan,
+      aiImplementationPlan
+    };
+    const [
+      executiveSummary,
+      financialForecast,
+      competitorAnalysis,
+      legalCompliance,
+      salesPack,
+      brandingPack,
+      seoStrategy,
+      productBacklog,
+      technicalDiagrams,
+      promptPack
+    ] = await Promise.all([
+      service.generateExecutiveSummary(deliverablesInput),
+      service.generateFinancialForecast(deliverablesInput),
+      service.generateCompetitorAnalysis(deliverablesInput),
+      service.generateLegalCompliance(deliverablesInput),
+      service.generateSalesPack(deliverablesInput),
+      service.generateBrandingPack(deliverablesInput),
+      service.generateSEOStrategy(deliverablesInput),
+      service.generateProductBacklog(deliverablesInput),
+      service.generateTechnicalDiagrams(deliverablesInput),
+      service.generatePromptPack(deliverablesInput)
+    ]);
 
     const response: AgentBuilderV2Response = {
       analysis,
@@ -93,7 +144,17 @@ export async function POST(request: Request) {
       pricingStrategy,
       marketingStrategy,
       developmentPlan,
-      aiImplementationPlan
+      aiImplementationPlan,
+      executiveSummary,
+      financialForecast,
+      competitorAnalysis,
+      legalCompliance,
+      salesPack,
+      brandingPack,
+      seoStrategy,
+      productBacklog,
+      technicalDiagrams,
+      promptPack
     };
 
     return NextResponse.json(response);

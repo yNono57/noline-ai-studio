@@ -18,6 +18,10 @@ type AgentRequest = {
   complexity: string;
   businessGoal: string;
   output: string;
+  description?: string;
+  targetAudience?: string;
+  systemPrompt?: string;
+  source?: string;
 };
 
 export async function GET(request: Request) {

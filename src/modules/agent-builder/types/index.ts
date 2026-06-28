@@ -264,6 +264,137 @@ export interface AIImplementationPlan {
   costOptimization: string[];
 }
 
+export interface ExecutiveSummary {
+  score: number;
+  summary: string;
+  vision: string;
+  opportunity: string;
+  keyFindings: string[];
+  priorities: string[];
+  nextSteps: string[];
+}
+
+export interface FinancialScenario {
+  year: string;
+  conservativeRevenue: string;
+  targetRevenue: string;
+  ambitiousRevenue: string;
+}
+
+export interface FinancialForecast {
+  score: number;
+  summary: string;
+  assumptions: string[];
+  scenarios: FinancialScenario[];
+  costDrivers: string[];
+  breakEvenHypothesis: string;
+  keyMetrics: string[];
+  disclaimer: string;
+}
+
+export interface CompetitorProfile {
+  name: string;
+  positioning: string;
+  strengths: string[];
+  weaknesses: string[];
+}
+
+export interface CompetitorAnalysis {
+  score: number;
+  summary: string;
+  marketPosition: string;
+  competitors: CompetitorProfile[];
+  differentiationOpportunities: string[];
+  monitoringActions: string[];
+}
+
+export interface LegalCompliance {
+  score: number;
+  summary: string;
+  riskLevel: "low" | "medium" | "high";
+  obligations: string[];
+  keyRisks: string[];
+  requiredActions: string[];
+  disclaimer: string;
+}
+
+export interface SalesPack {
+  score: number;
+  summary: string;
+  elevatorPitch: string;
+  valuePropositions: string[];
+  discoveryQuestions: string[];
+  objectionHandling: CustomerObjection[];
+  closingSequence: string[];
+}
+
+export interface BrandingPack {
+  score: number;
+  summary: string;
+  brandPositioning: string;
+  personality: string[];
+  nameIdeas: string[];
+  taglines: string[];
+  visualDirection: string[];
+  voiceGuidelines: string[];
+}
+
+export interface SEOKeyword {
+  keyword: string;
+  intent: string;
+  priority: "low" | "medium" | "high";
+}
+
+export interface SEOStrategy {
+  score: number;
+  summary: string;
+  keywords: SEOKeyword[];
+  contentPillars: string[];
+  priorityPages: string[];
+  technicalActions: string[];
+  keyMetrics: string[];
+}
+
+export interface ProductEpic {
+  name: string;
+  goal: string;
+  priority: "low" | "medium" | "high";
+  stories: string[];
+}
+
+export interface ProductBacklog {
+  score: number;
+  summary: string;
+  epics: ProductEpic[];
+  definitionOfDone: string[];
+  releaseCriteria: string[];
+}
+
+export interface TechnicalDiagrams {
+  score: number;
+  summary: string;
+  architectureDiagram: string;
+  dataFlowDiagram: string;
+  components: string[];
+  implementationNotes: string[];
+}
+
+export interface PromptTemplate {
+  name: string;
+  purpose: string;
+  systemPrompt: string;
+  userTemplate: string;
+  variables: string[];
+}
+
+export interface PromptPack {
+  score: number;
+  summary: string;
+  prompts: PromptTemplate[];
+  usageGuidelines: string[];
+  evaluationCriteria: string[];
+}
+
 export interface GenerateExpertStrategiesInput {
   analysis: IdeaAnalysis;
   businessScore: BusinessScore;
@@ -271,4 +402,13 @@ export interface GenerateExpertStrategiesInput {
   roadmap: AgentRoadmap;
   recommendations: ProductRecommendation[];
   context?: AgentBuilderContext;
+}
+
+export interface GenerateProjectDeliverablesInput
+  extends GenerateExpertStrategiesInput {
+  uxStrategy: UXStrategy;
+  pricingStrategy: PricingStrategy;
+  marketingStrategy: MarketingStrategy;
+  developmentPlan: DevelopmentPlan;
+  aiImplementationPlan: AIImplementationPlan;
 }

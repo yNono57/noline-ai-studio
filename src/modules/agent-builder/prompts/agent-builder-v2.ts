@@ -42,4 +42,14 @@ export type AgentBuilderV2Task =
   | "generate_pricing_strategy"
   | "generate_marketing_strategy"
   | "generate_development_plan"
-  | "generate_ai_implementation_plan";
+  | "generate_ai_implementation_plan"
+  | "generate_executive_summary"
+  | "generate_financial_forecast"
+  | "generate_competitor_analysis"
+  | "generate_legal_compliance"
+  | "generate_sales_pack"
+  | "generate_branding_pack"
+  | "generate_seo_strategy"
+  | "generate_product_backlog"
+  | "generate_technical_diagrams"
+  | "generate_prompt_pack";
