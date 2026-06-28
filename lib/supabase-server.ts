@@ -209,6 +209,34 @@ export async function getAgent(userId: string, id: string) {
   );
 }
 
+export async function saveAgentGeneration({
+  userId,
+  agentId,
+  agentName,
+  userPrompt,
+  output
+}: {
+  userId: string;
+  agentId: string;
+  agentName: string;
+  userPrompt: string;
+  output: string;
+}) {
+  const data = await supabaseAdmin("/rest/v1/generations", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: userId,
+      agent_id: agentId,
+      agent_name: agentName,
+      user_prompt: userPrompt,
+      input_values: { input: userPrompt },
+      result: output
+    })
+  });
+
+  return Array.isArray(data) ? data[0] : data;
+}
+
 export async function deleteAgent(userId: string, id: string) {
   await supabaseAdmin(`/rest/v1/agents?id=eq.${id}&user_id=eq.${userId}`, {
     method: "DELETE"

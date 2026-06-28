@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bot, Copy, Loader2, Pencil, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  Bot,
+  Check,
+  Copy,
+  Loader2,
+  Pencil,
+  Save,
+  Sparkles,
+  Trash2
+} from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
@@ -34,6 +44,13 @@ export function AgentDetailView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resolvingAgent, setResolvingAgent] = useState(Boolean(customAgentId));
+  const [agentInput, setAgentInput] = useState("");
+  const [agentOutput, setAgentOutput] = useState("");
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [runError, setRunError] = useState("");
+  const [runDemo, setRunDemo] = useState(false);
+  const [runHistorySaved, setRunHistorySaved] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     setClients(readClients());
@@ -62,7 +79,11 @@ export function AgentDetailView({
         }
         setCustomAgent(normalizeAgentRow(data.agent));
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Impossible de charger cet agent.");
+        const localAgent = readAgents().find((item) => item.id === agentId) || null;
+        setCustomAgent(localAgent);
+        if (!localAgent) {
+          setError(caught instanceof Error ? caught.message : "Impossible de charger cet agent.");
+        }
       } finally {
         setResolvingAgent(false);
       }
@@ -77,7 +98,7 @@ export function AgentDetailView({
       readHistory().filter(
         (record) => record.generatorId === (agent?.id || customAgent?.id)
       ),
-    [agent?.id, customAgent?.id, output]
+    [agent?.id, customAgent?.id, output, historyVersion]
   );
 
   if (resolvingAgent) {
@@ -140,6 +161,71 @@ export function AgentDetailView({
     }
   }
 
+  async function runCustomAgent(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const id = customAgent?.id;
+    const input = agentInput.trim();
+    if (!id || !input) {
+      setRunError("Décris ta demande avant de lancer l’agent.");
+      return;
+    }
+
+    setAgentRunning(true);
+    setRunError("");
+    setAgentOutput("");
+    setRunDemo(false);
+    setRunHistorySaved(false);
+
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(id)}/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          input,
+          localAgent: {
+            name: customAgent.name,
+            systemPrompt: customAgent.systemPrompt || customAgent.output
+          }
+        })
+      });
+      const data = (await response.json()) as {
+        output?: string;
+        error?: string;
+        demo?: boolean;
+        historySaved?: boolean;
+      };
+      if (!response.ok || !data.output) {
+        throw new Error(data.error || "L’agent n’a produit aucune réponse.");
+      }
+
+      setAgentOutput(data.output);
+      setRunDemo(Boolean(data.demo));
+      setRunHistorySaved(Boolean(data.historySaved));
+    } catch (caught) {
+      setRunError(caught instanceof Error ? caught.message : "Impossible d’utiliser cet agent.");
+    } finally {
+      setAgentRunning(false);
+    }
+  }
+
+  function saveRunToLocalHistory() {
+    if (!customAgent || !agentOutput) return;
+    saveRecord({
+      id: crypto.randomUUID(),
+      generatorId: customAgent.id,
+      title: customAgent.name,
+      createdAt: new Date().toISOString(),
+      values: { input: agentInput.trim() },
+      output: agentOutput,
+      userPrompt: agentInput.trim()
+    });
+    setRunHistorySaved(true);
+    setHistoryVersion((current) => current + 1);
+  }
+
   return (
     <div className="space-y-6">
       <section className="surface premium-border rounded-xl p-6 shadow-premium">
@@ -159,6 +245,13 @@ export function AgentDetailView({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href="#utiliser-agent"
+              className="inline-flex items-center gap-2 rounded-md bg-noline-orange px-4 py-2 text-sm font-black text-noline-black transition hover:bg-white"
+            >
+              <ArrowDown className="h-4 w-4" />
+              Utiliser cet agent
+            </a>
             <FavoriteButton type="agent" targetId={agent?.id || customAgent?.id || ""} label={name} />
             <CopyButton text={prompt} />
             {customAgent ? (
@@ -177,6 +270,92 @@ export function AgentDetailView({
           </div>
         </div>
       </section>
+
+      {customAgent ? (
+        <section
+          id="utiliser-agent"
+          className="surface premium-border scroll-mt-28 rounded-xl p-5 shadow-premium sm:p-6"
+        >
+          <div className="flex items-start gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-noline-orange text-noline-black">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-noline-orange">
+                Atelier
+              </p>
+              <h2 className="mt-1 text-2xl font-black text-white">Utiliser cet agent</h2>
+              <p className="mt-1 text-sm leading-6 text-noline-muted">
+                Donne une consigne précise. L’agent répondra avec son expertise et son prompt système.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={runCustomAgent} className="mt-6 space-y-4">
+            <label className="block" htmlFor="custom-agent-input">
+              <span className="mb-2 block text-sm font-bold text-white">Décris ta demande</span>
+              <textarea
+                id="custom-agent-input"
+                value={agentInput}
+                onChange={(event) => setAgentInput(event.target.value)}
+                placeholder="Exemple : prépare une stratégie claire pour lancer mon offre auprès des restaurants indépendants."
+                rows={6}
+                maxLength={10000}
+                className="field resize-y"
+              />
+            </label>
+            {runError ? (
+              <p className="rounded-md border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">
+                {runError}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              disabled={agentRunning || !agentInput.trim()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-noline-orange px-5 py-3 text-sm font-black text-noline-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {agentRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Bot className="h-4 w-4" />
+              )}
+              {agentRunning ? "Génération..." : "Générer avec cet agent"}
+            </button>
+          </form>
+
+          {agentOutput ? (
+            <div className="mt-6 border-t border-white/10 pt-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-black text-white">Résultat</h3>
+                  <p className="mt-1 text-xs text-noline-muted">
+                    {runDemo ? "Mode démonstration" : "Réponse générée par l’agent"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <CopyButton text={agentOutput} />
+                  <button
+                    type="button"
+                    onClick={saveRunToLocalHistory}
+                    disabled={runHistorySaved}
+                    className="inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-2 text-sm font-black text-white transition hover:border-noline-orange disabled:cursor-default disabled:text-emerald-300"
+                  >
+                    {runHistorySaved ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    {runHistorySaved ? "Historique sauvegardé" : "Sauvegarder dans l’historique"}
+                  </button>
+                </div>
+              </div>
+              <pre className="mt-4 whitespace-pre-wrap rounded-lg border border-white/10 bg-noline-black p-4 text-sm leading-7 text-white">
+                {agentOutput}
+              </pre>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <div className="space-y-6">
@@ -200,7 +379,7 @@ export function AgentDetailView({
         </div>
 
         {agent ? (
-          <section id="lancer" className="surface premium-border rounded-xl p-5">
+          <section id="utiliser-agent" className="surface premium-border scroll-mt-28 rounded-xl p-5">
             <div className="flex items-center gap-3">
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-noline-orange text-noline-black">
                 <Sparkles className="h-5 w-5" />

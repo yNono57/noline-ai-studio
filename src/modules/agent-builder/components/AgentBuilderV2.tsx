@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   ChartNoAxesCombined,
   Check,
+  ChevronDown,
   Clipboard,
   Code2,
   Download,
@@ -21,6 +22,7 @@ import {
   Paintbrush,
   Palette,
   RefreshCw,
+  Rocket,
   Save,
   Scale,
   Search,
@@ -93,6 +95,54 @@ interface ResultCard {
   render: React.ReactNode;
 }
 
+type ResultGroupId = "overview" | "product" | "business" | "marketing" | "technical";
+
+interface ResultGroup {
+  id: ResultGroupId;
+  title: string;
+  description: string;
+  cardIds: Array<keyof AgentBuilderV2Response>;
+}
+
+const RESULT_GROUPS: ResultGroup[] = [
+  {
+    id: "overview",
+    title: "Vue d’ensemble",
+    description: "La synthèse, le potentiel et les décisions prioritaires.",
+    cardIds: ["executiveSummary", "analysis", "businessScore", "recommendations"]
+  },
+  {
+    id: "product",
+    title: "Produit",
+    description: "La conception de l’agent et son évolution.",
+    cardIds: ["agent", "uxStrategy", "productBacklog", "roadmap"]
+  },
+  {
+    id: "business",
+    title: "Business",
+    description: "Le modèle économique, la concurrence et la vente.",
+    cardIds: ["financialForecast", "pricingStrategy", "competitorAnalysis", "salesPack"]
+  },
+  {
+    id: "marketing",
+    title: "Marketing",
+    description: "La marque, l’acquisition organique et le lancement.",
+    cardIds: ["brandingPack", "seoStrategy", "marketingStrategy"]
+  },
+  {
+    id: "technical",
+    title: "Technique",
+    description: "La réalisation, l’IA, les diagrammes et la conformité.",
+    cardIds: [
+      "developmentPlan",
+      "aiImplementationPlan",
+      "technicalDiagrams",
+      "promptPack",
+      "legalCompliance"
+    ]
+  }
+];
+
 const PROGRESS_STEPS = [
   "Analyse du marché",
   "Score business",
@@ -120,6 +170,10 @@ export function AgentBuilderV2() {
   const [copiedCard, setCopiedCard] = useState<string | null>(null);
   const [savingAgent, setSavingAgent] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [savedAgentId, setSavedAgentId] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<ResultGroupId>>(
+    () => new Set(["overview"])
+  );
 
   useEffect(() => {
     if (!loading) return;
@@ -142,6 +196,8 @@ export function AgentBuilderV2() {
     setProgress(0);
     setError("");
     setSaveMessage("");
+    setSavedAgentId(null);
+    setOpenGroups(new Set(["overview"]));
     setResult(null);
     setSubmittedIdea(normalizedIdea);
 
@@ -197,7 +253,7 @@ export function AgentBuilderV2() {
       description: result.agent.description,
       targetAudience: result.agent.targetAudience,
       systemPrompt: result.agent.systemPrompt,
-      source: "agent-builder-v3"
+      source: "agent-builder-v4"
     };
 
     setSavingAgent(true);
@@ -206,7 +262,8 @@ export function AgentBuilderV2() {
 
     try {
       if (!isSupabaseBrowserConfigured()) {
-        saveAgentLocal(input);
+        const savedAgent = saveAgentLocal(input);
+        setSavedAgentId(savedAgent.id);
         setSaveMessage("Agent sauvegardé dans votre bibliothèque locale.");
         return;
       }
@@ -219,10 +276,14 @@ export function AgentBuilderV2() {
         },
         body: JSON.stringify(input)
       });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) {
+      const data = (await response.json()) as {
+        agent?: { id?: string };
+        error?: string;
+      };
+      if (!response.ok || !data.agent?.id) {
         throw new Error(data.error || "La sauvegarde de l’agent a échoué.");
       }
+      setSavedAgentId(data.agent.id);
       setSaveMessage("Agent sauvegardé. Il est maintenant disponible dans votre bibliothèque.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Impossible de sauvegarder cet agent.");
@@ -232,6 +293,16 @@ export function AgentBuilderV2() {
   }
 
   const cards = result ? buildResultCards(result) : [];
+  const cardGroups = buildCardGroups(cards);
+
+  function toggleGroup(groupId: ResultGroupId) {
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
 
   return (
     <Shell>
@@ -331,7 +402,7 @@ export function AgentBuilderV2() {
                 <button
                   type="button"
                   onClick={() => void saveGeneratedAgent()}
-                  disabled={savingAgent}
+                  disabled={savingAgent || Boolean(savedAgentId)}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-noline-orange px-4 py-2.5 text-sm font-black text-noline-black transition hover:bg-white disabled:opacity-60"
                 >
                   {savingAgent ? (
@@ -339,7 +410,11 @@ export function AgentBuilderV2() {
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  {savingAgent ? "Sauvegarde..." : "Sauvegarder l’agent"}
+                  {savingAgent
+                    ? "Sauvegarde..."
+                    : savedAgentId
+                      ? "Agent sauvegardé"
+                      : "Sauvegarder l’agent"}
                 </button>
                 <button
                   type="button"
@@ -347,6 +422,7 @@ export function AgentBuilderV2() {
                     setResult(null);
                     setError("");
                     setSaveMessage("");
+                    setSavedAgentId(null);
                   }}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:border-noline-orange hover:text-noline-orange"
                 >
@@ -357,59 +433,96 @@ export function AgentBuilderV2() {
             </div>
 
             {saveMessage ? (
-              <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
-                {saveMessage}
+              <div
+                role="status"
+                className="flex flex-col gap-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <span>{saveMessage}</span>
+                {savedAgentId ? (
+                  <a
+                    href={`/agents/${savedAgentId}`}
+                    className="shrink-0 rounded-md bg-emerald-300 px-3 py-2 text-center text-xs font-black text-noline-black transition hover:bg-white"
+                  >
+                    Ouvrir la fiche
+                  </a>
+                ) : null}
               </div>
             ) : null}
 
             {error ? <ErrorMessage message={error} /> : null}
 
-            <div className="grid gap-5 xl:grid-cols-2">
-              {cards.map((card, index) => {
-                const Icon = card.icon;
-
-                return (
-                  <article
-                    key={card.id}
-                    className={`surface premium-border overflow-hidden rounded-xl shadow-premium ${
-                      index === 2 ? "xl:col-span-2" : ""
-                    }`}
+            <div className="surface premium-border rounded-xl p-5 shadow-premium sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-noline-orange">
+                    Prochaine évolution
+                  </p>
+                  <h3 className="mt-1 text-lg font-black text-white">Transformer le dossier en SaaS</h3>
+                  <p id="create-saas-description" className="mt-1 max-w-2xl text-xs leading-5 text-noline-muted">
+                    Cette fonctionnalité générera prochainement le cahier des charges, les routes API,
+                    la base de données, les écrans et le backlog technique.
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                  <span className="rounded-full border border-noline-orange/30 bg-noline-orange/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-noline-orange">
+                    Bientôt disponible
+                  </span>
+                  <button
+                    type="button"
+                    disabled
+                    aria-describedby="create-saas-description"
+                    title="Cette fonctionnalité générera prochainement le cahier des charges, les routes API, la base de données, les écrans et le backlog technique."
+                    className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-white/10 px-5 py-3 text-sm font-black text-noline-muted opacity-70"
                   >
-                    <div className="flex flex-col gap-4 border-b border-white/10 p-5 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-noline-orange/30 bg-noline-orange/10 text-noline-orange">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-noline-orange">
-                            {card.eyebrow}
-                          </p>
-                          <h3 className="mt-1 text-lg font-black text-white">{card.title}</h3>
-                          <p className="mt-1 text-xs leading-5 text-noline-muted">
-                            {card.description}
-                          </p>
-                        </div>
+                    <Rocket className="h-4 w-4" />
+                    Créer ce SaaS
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {cardGroups.map((group) => {
+                const isOpen = openGroups.has(group.id);
+                return (
+                  <section key={group.id} className="overflow-hidden rounded-xl border border-white/10 bg-[#181818]/80">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.id)}
+                      aria-expanded={isOpen}
+                      aria-controls={`result-group-${group.id}`}
+                      className="flex w-full items-center justify-between gap-4 p-5 text-left transition hover:bg-white/[0.03]"
+                    >
+                      <span>
+                        <span className="block text-lg font-black text-white">{group.title}</span>
+                        <span className="mt-1 block text-xs leading-5 text-noline-muted">
+                          {group.description}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-3">
+                        <span className="rounded-full bg-white/5 px-2.5 py-1 text-xs font-black text-noline-muted">
+                          {group.cards.length}
+                        </span>
+                        <ChevronDown
+                          className={`h-5 w-5 text-noline-orange transition-transform ${isOpen ? "rotate-180" : ""}`}
+                        />
+                      </span>
+                    </button>
+                    {isOpen ? (
+                      <div id={`result-group-${group.id}`} className="grid gap-5 border-t border-white/10 p-4 xl:grid-cols-2">
+                        {group.cards.map((card) => (
+                          <ResultCardView
+                            key={card.id}
+                            card={card}
+                            copied={copiedCard === card.id}
+                            onCopy={() => void copyCard(card)}
+                            onRegenerate={() => void generate(submittedIdea)}
+                            onExport={() => exportCard(card)}
+                          />
+                        ))}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <CardAction
-                          label={copiedCard === card.id ? "Copié" : "Copier"}
-                          icon={copiedCard === card.id ? Check : Clipboard}
-                          onClick={() => void copyCard(card)}
-                        />
-                        <CardAction
-                          label="Régénérer"
-                          icon={RefreshCw}
-                          onClick={() => void generate(submittedIdea)}
-                        />
-                        <CardAction
-                          label="Export Markdown"
-                          icon={Download}
-                          onClick={() => exportCard(card)}
-                        />
-                      </div>
-                    </div>
-                    <div className="p-5 sm:p-6">{card.render}</div>
-                  </article>
+                    ) : null}
+                  </section>
                 );
               })}
             </div>
@@ -417,6 +530,67 @@ export function AgentBuilderV2() {
         ) : null}
       </main>
     </Shell>
+  );
+}
+
+function buildCardGroups(cards: ResultCard[]) {
+  const cardMap = new Map(cards.map((card) => [card.id, card]));
+
+  return RESULT_GROUPS.map((group) => ({
+    ...group,
+    cards: group.cardIds
+      .map((cardId) => cardMap.get(cardId))
+      .filter((card): card is ResultCard => Boolean(card))
+  }));
+}
+
+function ResultCardView({
+  card,
+  copied,
+  onCopy,
+  onRegenerate,
+  onExport
+}: {
+  card: ResultCard;
+  copied: boolean;
+  onCopy: () => void;
+  onRegenerate: () => void;
+  onExport: () => void;
+}) {
+  const Icon = card.icon;
+  const featured = card.id === "executiveSummary" || card.id === "agent";
+
+  return (
+    <article
+      className={`surface premium-border overflow-hidden rounded-xl shadow-premium ${
+        featured ? "xl:col-span-2" : ""
+      }`}
+    >
+      <div className="flex flex-col gap-4 border-b border-white/10 p-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-noline-orange/30 bg-noline-orange/10 text-noline-orange">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-noline-orange">
+              {card.eyebrow}
+            </p>
+            <h3 className="mt-1 text-lg font-black text-white">{card.title}</h3>
+            <p className="mt-1 text-xs leading-5 text-noline-muted">{card.description}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <CardAction
+            label={copied ? "Copié" : "Copier"}
+            icon={copied ? Check : Clipboard}
+            onClick={onCopy}
+          />
+          <CardAction label="Régénérer" icon={RefreshCw} onClick={onRegenerate} />
+          <CardAction label="Export Markdown" icon={Download} onClick={onExport} />
+        </div>
+      </div>
+      <div className="p-5 sm:p-6">{card.render}</div>
+    </article>
   );
 }
 
@@ -516,8 +690,8 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
   return [
     {
       id: "analysis",
-      eyebrow: "Carte 1",
-      title: "Analyse",
+      eyebrow: "Stratégie",
+      title: "Analyse stratégique",
       description: "Le marché, la cible et le besoin détectés.",
       icon: Target,
       content: analysisMarkdown(result.analysis),
@@ -525,7 +699,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "businessScore",
-      eyebrow: "Carte 2",
+      eyebrow: "Potentiel",
       title: "Score business",
       description: "Une lecture rapide du potentiel de l’idée.",
       icon: TrendingUp,
@@ -534,8 +708,8 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "agent",
-      eyebrow: "Carte 3",
-      title: "Fiche complète",
+      eyebrow: "Produit",
+      title: "Fiche agent",
       description: "Le positionnement et les paramètres du futur agent.",
       icon: Bot,
       content: agentMarkdown(result.agent),
@@ -543,8 +717,8 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "roadmap",
-      eyebrow: "Carte 4",
-      title: "Roadmap",
+      eyebrow: "Produit",
+      title: "Roadmap produit",
       description: "Les étapes prioritaires pour passer de l’idée au produit.",
       icon: ArrowRight,
       content: roadmapMarkdown(result.roadmap),
@@ -552,8 +726,8 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "recommendations",
-      eyebrow: "Carte 5",
-      title: "Recommandations",
+      eyebrow: "Priorités",
+      title: "Recommandations prioritaires",
       description: "Les décisions produit les plus utiles maintenant.",
       icon: WandSparkles,
       content: recommendationsMarkdown(result.recommendations),
@@ -561,7 +735,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "uxStrategy",
-      eyebrow: "Expert V3 · UX",
+      eyebrow: "Produit",
       title: "Expérience utilisateur",
       description: "Le parcours, l’onboarding et les leviers de rétention.",
       icon: Palette,
@@ -570,7 +744,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "pricingStrategy",
-      eyebrow: "Expert V3 · Pricing",
+      eyebrow: "Business",
       title: "Stratégie tarifaire",
       description: "Le modèle économique, les offres et les tests de prix.",
       icon: BadgeEuro,
@@ -579,7 +753,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "marketingStrategy",
-      eyebrow: "Expert V3 · Growth",
+      eyebrow: "Marketing",
       title: "Plan marketing",
       description: "Le positionnement, les canaux et le plan de lancement.",
       icon: Megaphone,
@@ -588,7 +762,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "developmentPlan",
-      eyebrow: "Expert V3 · Tech",
+      eyebrow: "Technique",
       title: "Plan de développement",
       description: "L’architecture, les phases et les garde-fous techniques.",
       icon: Code2,
@@ -597,7 +771,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "aiImplementationPlan",
-      eyebrow: "Expert V3 · AI",
+      eyebrow: "Technique",
       title: "Implémentation IA",
       description: "Les modèles, prompts, évaluations et coûts.",
       icon: BrainCircuit,
@@ -606,11 +780,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "executiveSummary",
-      eyebrow: "Livrable V4 · Direction",
-      title: "Executive Summary",
+      eyebrow: "Direction",
+      title: "Résumé exécutif",
       description: "La synthèse décisionnelle du projet.",
       icon: FileText,
-      content: v4Markdown("Executive Summary", result.executiveSummary),
+      content: v4Markdown("Résumé exécutif", result.executiveSummary),
       render: (
         <V4Content
           score={result.executiveSummary.score}
@@ -626,11 +800,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "financialForecast",
-      eyebrow: "Livrable V4 · Finance",
-      title: "Financial Forecast",
+      eyebrow: "Business",
+      title: "Prévisionnel financier",
       description: "Les hypothèses financières et scénarios à valider.",
       icon: ChartNoAxesCombined,
-      content: v4Markdown("Financial Forecast", result.financialForecast),
+      content: v4Markdown("Prévisionnel financier", result.financialForecast),
       render: (
         <V4Content
           score={result.financialForecast.score}
@@ -646,11 +820,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "competitorAnalysis",
-      eyebrow: "Livrable V4 · Marché",
-      title: "Competitor Analysis",
+      eyebrow: "Business",
+      title: "Analyse concurrentielle",
       description: "Le paysage concurrentiel et les espaces de différenciation.",
       icon: Swords,
-      content: v4Markdown("Competitor Analysis", result.competitorAnalysis),
+      content: v4Markdown("Analyse concurrentielle", result.competitorAnalysis),
       render: (
         <V4Content
           score={result.competitorAnalysis.score}
@@ -665,11 +839,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "legalCompliance",
-      eyebrow: "Livrable V4 · Conformité",
-      title: "Legal & Compliance",
+      eyebrow: "Technique",
+      title: "Juridique & conformité",
       description: "Les obligations probables et actions de réduction des risques.",
       icon: Scale,
-      content: v4Markdown("Legal & Compliance", result.legalCompliance),
+      content: v4Markdown("Juridique & conformité", result.legalCompliance),
       render: (
         <V4Content
           score={result.legalCompliance.score}
@@ -686,11 +860,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "salesPack",
-      eyebrow: "Livrable V4 · Vente",
-      title: "Sales Pack",
+      eyebrow: "Business",
+      title: "Pack commercial",
       description: "Le discours et les outils du cycle commercial.",
       icon: Handshake,
-      content: v4Markdown("Sales Pack", result.salesPack),
+      content: v4Markdown("Pack commercial", result.salesPack),
       render: (
         <V4Content
           score={result.salesPack.score}
@@ -706,11 +880,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "brandingPack",
-      eyebrow: "Livrable V4 · Marque",
-      title: "Branding Pack",
+      eyebrow: "Marketing",
+      title: "Branding",
       description: "Le territoire de marque et ses premières expressions.",
       icon: Paintbrush,
-      content: v4Markdown("Branding Pack", result.brandingPack),
+      content: v4Markdown("Branding", result.brandingPack),
       render: (
         <V4Content
           score={result.brandingPack.score}
@@ -727,11 +901,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "seoStrategy",
-      eyebrow: "Livrable V4 · Acquisition",
-      title: "SEO Strategy",
+      eyebrow: "Marketing",
+      title: "Stratégie SEO",
       description: "Les intentions de recherche et priorités organiques.",
       icon: Search,
-      content: v4Markdown("SEO Strategy", result.seoStrategy),
+      content: v4Markdown("Stratégie SEO", result.seoStrategy),
       render: (
         <V4Content
           score={result.seoStrategy.score}
@@ -747,11 +921,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "productBacklog",
-      eyebrow: "Livrable V4 · Produit",
-      title: "Product Backlog",
+      eyebrow: "Produit",
+      title: "Backlog produit",
       description: "Les epics et critères de livraison prioritaires.",
       icon: ListChecks,
-      content: v4Markdown("Product Backlog", result.productBacklog),
+      content: v4Markdown("Backlog produit", result.productBacklog),
       render: (
         <V4Content
           score={result.productBacklog.score}
@@ -766,11 +940,11 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "technicalDiagrams",
-      eyebrow: "Livrable V4 · Architecture",
-      title: "Technical Diagrams",
+      eyebrow: "Technique",
+      title: "Diagrammes techniques",
       description: "Les vues Mermaid de l’architecture et des flux.",
       icon: Network,
-      content: v4Markdown("Technical Diagrams", result.technicalDiagrams),
+      content: v4Markdown("Diagrammes techniques", result.technicalDiagrams),
       render: (
         <V4Content
           score={result.technicalDiagrams.score}
@@ -787,7 +961,7 @@ function buildResultCards(result: AgentBuilderV2Response): ResultCard[] {
     },
     {
       id: "promptPack",
-      eyebrow: "Livrable V4 · Prompts",
+      eyebrow: "Technique",
       title: "Prompt Pack",
       description: "Les prompts prêts à adapter aux cas d’usage clés.",
       icon: MessageSquareText,

@@ -37,7 +37,8 @@ export async function GET(request: Request) {
 
     const agents = await listAgents(user.id);
     return NextResponse.json({ agents });
-  } catch {
+  } catch (error) {
+    console.error("[agents] Unable to list agents", error);
     return NextResponse.json(
       { error: "Impossible de charger les agents." },
       { status: 500 }
@@ -80,7 +81,8 @@ export async function POST(request: Request) {
     const agent = await saveAgent({ userId: user.id, ...body });
 
     return NextResponse.json({ agent });
-  } catch {
+  } catch (error) {
+    console.error("[agents] Unable to save agent", error);
     return NextResponse.json(
       { error: "Impossible de sauvegarder l'agent." },
       { status: 500 }
@@ -106,7 +108,8 @@ export async function DELETE(request: Request) {
 
     await deleteAgent(user.id, id);
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("[agents] Unable to delete agent", error);
     return NextResponse.json(
       { error: "Impossible de supprimer l'agent." },
       { status: 500 }
