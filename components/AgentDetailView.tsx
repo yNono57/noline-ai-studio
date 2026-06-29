@@ -509,20 +509,22 @@ export function AgentDetailView({
           <section className="surface premium-border rounded-xl p-5">
             <h2 className="text-lg font-black text-white">Cas d’utilisation</h2>
             <ul className="mt-4 space-y-3 text-sm text-noline-muted">
-              {(agent?.useCases || customAgent?.features.split("\n") || []).map((useCase) => (
+              {(agent?.useCases || customAgent?.features.split("\n") || []).map((useCase) => {
+                const cleanUseCase = useCase.replace(/^\s*[-•]\s*/, "");
+                return (
                 <li key={useCase} className="flex gap-3">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-noline-orange" />
-                  {useCase}
+                  {cleanUseCase}
                 </li>
-              ))}
+              );})}
             </ul>
           </section>
-          <section className="surface premium-border rounded-xl p-5">
-            <h2 className="text-lg font-black text-white">Prompt système</h2>
+          <details className="surface premium-border rounded-xl p-5">
+            <summary className="cursor-pointer text-lg font-black text-white">Détails techniques</summary>
             <pre className="mt-4 whitespace-pre-wrap rounded-lg bg-noline-black p-4 text-sm leading-6 text-noline-muted">
               {prompt}
             </pre>
-          </section>
+          </details>
         </div>
 
         {agent ? (

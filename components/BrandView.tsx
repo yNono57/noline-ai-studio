@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import { ImagePlus, Save } from "lucide-react";
 import { defaultBrand, readBrand, saveBrand, type ClientBrand } from "@/lib/brand";
+import { readClients, type AgencyClient } from "@/lib/agency";
 import { getAuthHeaders, isSupabaseBrowserConfigured } from "@/lib/supabase-client";
 
 export function BrandView() {
   const [brand, setBrand] = useState<ClientBrand>(defaultBrand);
   const [saved, setSaved] = useState(false);
+  const [clients, setClients] = useState<AgencyClient[]>([]);
 
   useEffect(() => {
+    setClients(readClients());
     if (!isSupabaseBrowserConfigured()) {
       setBrand(readBrand());
       return;
@@ -36,6 +39,22 @@ export function BrandView() {
       })
       .catch(() => setBrand(readBrand()));
   }, []);
+
+  function useClient(clientId: string) {
+    const client = clients.find((item) => item.id === clientId);
+    if (!client) return;
+    setBrand({
+      structureName: client.name,
+      logo: client.logo,
+      primaryColor: client.primaryColor,
+      secondaryColor: client.secondaryColor,
+      typography: "Arial",
+      socials: [client.facebook, client.instagram, client.linkedin, client.tiktok].filter(Boolean).join(" · "),
+      email: client.email,
+      website: client.website
+    });
+    setSaved(false);
+  }
 
   function update<K extends keyof ClientBrand>(key: K, value: ClientBrand[K]) {
     setBrand((current) => ({ ...current, [key]: value }));
@@ -74,6 +93,7 @@ export function BrandView() {
         </p>
         <h1 className="mt-2 text-3xl font-black text-white">Identite sauvegardee</h1>
         <div className="mt-6 grid gap-4">
+          <label className="block"><span className="mb-2 block text-sm font-bold text-white">Préremplir depuis un client</span><select className="field" defaultValue="" onChange={(event) => useClient(event.target.value)}><option value="">Choisir un client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
           <Field label="Nom de la structure" value={brand.structureName} onChange={(value) => update("structureName", value)} placeholder="Ex. AS Montreuil" />
           <label className="block">
             <span className="mb-2 block text-sm font-bold text-white">Logo</span>
