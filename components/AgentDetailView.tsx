@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDown,
@@ -23,7 +23,13 @@ import {
   type ApiAgentRow
 } from "@/lib/agents";
 import { readClients, type AgencyClient } from "@/lib/agency";
-import { readHistory, saveRecord } from "@/lib/history";
+import {
+  normalizeGenerationRecord,
+  mergeGenerationRecords,
+  readHistory,
+  saveRecord,
+  type GenerationRecord
+} from "@/lib/history";
 import type { OfficialAgent } from "@/lib/official-agents";
 import {
   getAuthHeaders,
@@ -52,6 +58,7 @@ export function AgentDetailView({
   const [runDemo, setRunDemo] = useState(false);
   const [runHistorySaved, setRunHistorySaved] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [history, setHistory] = useState<GenerationRecord[]>([]);
 
   useEffect(() => {
     setClients(readClients());
@@ -94,13 +101,39 @@ export function AgentDetailView({
   }, [customAgentId]);
 
   const agent = officialAgent;
-  const history = useMemo(
-    () =>
-      readHistory().filter(
-        (record) => record.generatorId === (agent?.id || customAgent?.id)
-      ),
-    [agent?.id, customAgent?.id, output, historyVersion]
-  );
+  const historyAgentId = agent?.id || customAgent?.id || "";
+
+  useEffect(() => {
+    if (!historyAgentId) return;
+    let cancelled = false;
+    const local = readHistory().filter(
+      (record) => record.generatorId === historyAgentId
+    );
+
+    if (!isSupabaseBrowserConfigured()) {
+      setHistory(local);
+      return;
+    }
+
+    fetch("/api/creations", { headers: getAuthHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const remote = Array.isArray(data?.texts)
+          ? data.texts
+              .map(normalizeGenerationRecord)
+              .filter((record: GenerationRecord) => record.generatorId === historyAgentId)
+          : [];
+        setHistory(mergeGenerationRecords(remote, local));
+      })
+      .catch(() => {
+        if (!cancelled) setHistory(local);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentOutput, historyAgentId, historyVersion, output]);
 
   if (resolvingAgent) {
     return (

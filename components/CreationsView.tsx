@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Download, FileText, Image as ImageIcon } from "lucide-react";
-import { readHistory, type GenerationRecord } from "@/lib/history";
+import {
+  normalizeGenerationRecord,
+  mergeGenerationRecords,
+  readHistory,
+  type GenerationRecord
+} from "@/lib/history";
 import { readVisualHistory, type VisualRecord } from "@/lib/visual-history";
 import { getAuthHeaders, isSupabaseBrowserConfigured } from "@/lib/supabase-client";
 import { CopyButton } from "./CopyButton";
@@ -28,15 +33,10 @@ export function CreationsView() {
         }
 
         setTexts(
-          (data.texts || []).map((item: Record<string, unknown>) => ({
-            id: String(item.id),
-            generatorId: String(item.agent_id || item.generator_id || ""),
-            title: String(item.agent_name || item.title || "Agent"),
-            createdAt: String(item.created_at),
-            values: (item.input_values || item.values || {}) as Record<string, string>,
-            output: String(item.result || item.output || ""),
-            userPrompt: String(item.user_prompt || "")
-          }))
+          mergeGenerationRecords(
+            (data.texts || []).map(normalizeGenerationRecord),
+            readHistory()
+          )
         );
         setVisuals(
           (data.visuals || []).map((item: Record<string, unknown>) => ({

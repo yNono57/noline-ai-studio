@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { GenerationHistoryCard } from "./agent-report/GenerationHistoryCard";
-import { deleteHistoryRecord, readHistory, type GenerationRecord } from "@/lib/history";
+import {
+  deleteHistoryRecord,
+  mergeGenerationRecords,
+  normalizeGenerationRecord,
+  readHistory,
+  type GenerationRecord
+} from "@/lib/history";
 import {
   getAuthHeaders,
   isSupabaseBrowserConfigured
@@ -24,9 +30,9 @@ export function HistoryView() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         const remote = Array.isArray(data?.texts)
-          ? data.texts.map(normalizeGeneration)
+          ? data.texts.map(normalizeGenerationRecord)
           : [];
-        setRecords(remote.length > 0 ? remote : readHistory());
+        setRecords(mergeGenerationRecords(remote, readHistory()));
       })
       .catch(() => setRecords(readHistory()));
   }, []);
@@ -95,16 +101,4 @@ export function HistoryView() {
 
 function formatValues(values: Record<string, string>) {
   return Object.values(values).filter(Boolean).join(" · ") || "Prompt non disponible";
-}
-
-function normalizeGeneration(item: Record<string, unknown>): GenerationRecord {
-  return {
-    id: String(item.id),
-    generatorId: String(item.agent_id || item.generator_id || ""),
-    title: String(item.agent_name || item.title || "Agent"),
-    createdAt: String(item.created_at),
-    values: (item.input_values || item.values || {}) as Record<string, string>,
-    output: String(item.result || item.output || ""),
-    userPrompt: String(item.user_prompt || "")
-  };
 }

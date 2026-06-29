@@ -133,16 +133,25 @@ export async function saveGeneratedText({
   values: Record<string, string>;
   output: string;
 }) {
-  await supabaseAdmin("/rest/v1/generations", {
-    method: "POST",
-    body: JSON.stringify({
+  try {
+    await insertGeneration({
       user_id: userId,
       generator_id: generatorId,
       title,
       values,
       output
-    })
-  });
+    });
+  } catch (error) {
+    if (!isGenerationSchemaCompatibilityError(error)) throw error;
+    await insertGeneration({
+      user_id: userId,
+      agent_id: generatorId,
+      agent_name: title,
+      user_prompt: formatGenerationPrompt(values),
+      input_values: values,
+      result: output
+    });
+  }
 }
 
 export async function saveAgent({
@@ -222,19 +231,51 @@ export async function saveAgentGeneration({
   userPrompt: string;
   output: string;
 }) {
-  const data = await supabaseAdmin("/rest/v1/generations", {
-    method: "POST",
-    body: JSON.stringify({
+  let data: unknown;
+  try {
+    data = await insertGeneration({
       user_id: userId,
       agent_id: agentId,
       agent_name: agentName,
       user_prompt: userPrompt,
       input_values: { input: userPrompt },
       result: output
-    })
-  });
+    });
+  } catch (error) {
+    if (!isGenerationSchemaCompatibilityError(error)) throw error;
+    data = await insertGeneration({
+      user_id: userId,
+      generator_id: agentId,
+      title: agentName,
+      values: { input: userPrompt },
+      output
+    });
+  }
 
   return Array.isArray(data) ? data[0] : data;
+}
+
+function insertGeneration(payload: Record<string, unknown>) {
+  return supabaseAdmin("/rest/v1/generations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+function isGenerationSchemaCompatibilityError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return /PGRST204|23502|schema cache|could not find.*column|column .* does not exist|null value in column/i.test(
+    error.message
+  );
+}
+
+function formatGenerationPrompt(values: Record<string, string>) {
+  return (
+    Object.entries(values)
+      .filter(([, value]) => value?.trim())
+      .map(([key, value]) => `${key}: ${value.trim()}`)
+      .join("\n") || "Demande générateur"
+  );
 }
 
 export async function deleteAgent(userId: string, id: string) {
