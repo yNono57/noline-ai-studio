@@ -12,6 +12,7 @@ import {
   FileText,
   Lightbulb,
   Linkedin,
+  Loader2,
   Mail,
   RefreshCw,
   Save,
@@ -26,12 +27,16 @@ export function AgentReport({
   title,
   onSave,
   saved = false,
+  saveLoading = false,
+  historyHref = "/history",
   hideToolbar = false
 }: {
   content: string;
   title: string;
-  onSave?: () => void;
+  onSave?: () => void | Promise<void>;
   saved?: boolean;
+  saveLoading?: boolean;
+  historyHref?: string;
   hideToolbar?: boolean;
 }) {
   const sections = useMemo(() => parseAgentReport(content), [content]);
@@ -59,12 +64,28 @@ export function AgentReport({
           />
           <ReportAction label="Export Markdown" icon={Download} onClick={() => exportMarkdown(content, title)} />
           <ReportAction label="Export PDF" icon={FileDown} onClick={() => exportPdf(content, title)} />
-          {onSave || saved ? (
+          {saved ? (
+            <>
+              <ReportAction
+                label="Déjà sauvegardé"
+                icon={Check}
+                onClick={() => undefined}
+                disabled
+              />
+              <a
+                href={historyHref}
+                className="inline-flex items-center gap-2 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-200 transition hover:bg-emerald-500/20"
+              >
+                Voir dans l’historique
+              </a>
+            </>
+          ) : onSave ? (
             <ReportAction
-              label={saved ? "Sauvegardé" : "Sauvegarder"}
-              icon={saved ? Check : Save}
-              onClick={onSave || (() => undefined)}
-              disabled={saved}
+              label={saveLoading ? "Sauvegarde..." : "Sauvegarder"}
+              icon={saveLoading ? Loader2 : Save}
+              onClick={() => void onSave()}
+              disabled={saveLoading}
+              loading={saveLoading}
             />
           ) : null}
         </div>
@@ -198,12 +219,14 @@ function ReportAction({
   label,
   icon: Icon,
   onClick,
-  disabled = false
+  disabled = false,
+  loading = false
 }: {
   label: string;
   icon: typeof Save;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   return (
     <button
@@ -212,7 +235,7 @@ function ReportAction({
       disabled={disabled}
       className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-noline-black px-3 py-2 text-xs font-black text-white transition hover:border-noline-orange disabled:text-emerald-300"
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
       {label}
     </button>
   );

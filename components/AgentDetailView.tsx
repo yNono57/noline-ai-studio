@@ -57,6 +57,11 @@ export function AgentDetailView({
   const [runError, setRunError] = useState("");
   const [runDemo, setRunDemo] = useState(false);
   const [runHistorySaved, setRunHistorySaved] = useState(false);
+  const [historySaving, setHistorySaving] = useState(false);
+  const [historyFeedback, setHistoryFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
 
@@ -209,6 +214,8 @@ export function AgentDetailView({
     setAgentOutput("");
     setRunDemo(false);
     setRunHistorySaved(false);
+    setHistorySaving(false);
+    setHistoryFeedback(null);
 
     try {
       const response = await fetch(`/api/agents/${encodeURIComponent(id)}/run`, {
@@ -237,7 +244,14 @@ export function AgentDetailView({
 
       setAgentOutput(data.output);
       setRunDemo(Boolean(data.demo));
-      setRunHistorySaved(Boolean(data.historySaved));
+      const historySaved = Boolean(data.historySaved);
+      setRunHistorySaved(historySaved);
+      if (historySaved) {
+        setHistoryFeedback({
+          type: "success",
+          message: "Génération sauvegardée dans l’historique"
+        });
+      }
     } catch (caught) {
       setRunError(caught instanceof Error ? caught.message : "Impossible d’utiliser cet agent.");
     } finally {
@@ -245,19 +259,38 @@ export function AgentDetailView({
     }
   }
 
-  function saveRunToLocalHistory() {
-    if (!customAgent || !agentOutput) return;
-    saveRecord({
-      id: crypto.randomUUID(),
-      generatorId: customAgent.id,
-      title: customAgent.name,
-      createdAt: new Date().toISOString(),
-      values: { input: agentInput.trim() },
-      output: agentOutput,
-      userPrompt: agentInput.trim()
-    });
-    setRunHistorySaved(true);
-    setHistoryVersion((current) => current + 1);
+  async function saveRunToLocalHistory() {
+    if (!customAgent || !agentOutput || runHistorySaved || historySaving) return;
+
+    setHistorySaving(true);
+    setHistoryFeedback(null);
+    try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+      saveRecord({
+        id: crypto.randomUUID(),
+        generatorId: customAgent.id,
+        title: customAgent.name,
+        createdAt: new Date().toISOString(),
+        values: { input: agentInput.trim() },
+        output: agentOutput,
+        userPrompt: agentInput.trim()
+      });
+      setRunHistorySaved(true);
+      setHistoryVersion((current) => current + 1);
+      setHistoryFeedback({
+        type: "success",
+        message: "Génération sauvegardée dans l’historique"
+      });
+    } catch {
+      setHistoryFeedback({
+        type: "error",
+        message: "Erreur lors de la sauvegarde"
+      });
+    } finally {
+      setHistorySaving(false);
+    }
   }
 
   return (
@@ -371,7 +404,20 @@ export function AgentDetailView({
                 title={`${customAgent.name} — Rapport`}
                 onSave={saveRunToLocalHistory}
                 saved={runHistorySaved}
+                saveLoading={historySaving}
               />
+              {historyFeedback ? (
+                <div
+                  role={historyFeedback.type === "error" ? "alert" : "status"}
+                  className={`mt-4 rounded-lg border p-3 text-sm font-bold ${
+                    historyFeedback.type === "success"
+                      ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+                      : "border-red-400/30 bg-red-500/10 text-red-100"
+                  }`}
+                >
+                  {historyFeedback.message}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
