@@ -41,6 +41,21 @@ export function getAuthHeaders(): Record<string, string> {
   return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
 }
 
+export async function getAuthenticatedHeaders(
+  forceRefresh = false
+): Promise<Record<string, string>> {
+  const session = getStoredSession() || getSupabaseBrowserSession();
+  if (!session) return {};
+
+  const validSession = forceRefresh || isSessionExpiring(session)
+    ? await refreshSession(session.refresh_token)
+    : session;
+
+  return validSession?.access_token
+    ? { Authorization: `Bearer ${validSession.access_token}` }
+    : {};
+}
+
 export async function signUpWithEmail(email: string, password: string) {
   const data = await authRequest("/signup", { email, password });
   const session = normalizeSession(data);
@@ -57,6 +72,48 @@ export async function signInWithEmail(email: string, password: string) {
 
 export function signOutLocal() {
   storeSession(null);
+}
+
+async function refreshSession(refreshToken: string) {
+  if (!refreshToken) return null;
+
+  try {
+    const data = await authRequest("/token?grant_type=refresh_token", {
+      refresh_token: refreshToken
+    });
+    const session = normalizeSession(data);
+    if (session) storeSession(session);
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function isSessionExpiring(session: AuthSession) {
+  if (!session.expires_at) return false;
+  return session.expires_at * 1000 <= Date.now() + 60_000;
+}
+
+function getSupabaseBrowserSession(): AuthSession | null {
+  if (typeof window === "undefined") return null;
+
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+
+    try {
+      const value = JSON.parse(window.localStorage.getItem(key) || "null") as unknown;
+      const session = normalizeSession(value);
+      if (session) {
+        storeSession(session);
+        return session;
+      }
+    } catch {
+      // Ignore malformed or unrelated Supabase storage entries.
+    }
+  }
+
+  return null;
 }
 
 async function authRequest(path: string, body: Record<string, string>) {

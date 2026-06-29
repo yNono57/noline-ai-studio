@@ -11,7 +11,7 @@ import {
   type GenerationRecord
 } from "@/lib/history";
 import {
-  getAuthHeaders,
+  getAuthenticatedHeaders,
   isSupabaseBrowserConfigured
 } from "@/lib/supabase-client";
 
@@ -26,20 +26,39 @@ export function HistoryView() {
       return;
     }
 
-    fetch("/api/history", {
-      headers: getAuthHeaders(),
-      cache: "no-store"
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      try {
+        let headers = await getAuthenticatedHeaders();
+        let response = await fetch("/api/history", {
+          headers,
+          cache: "no-store"
+        });
+        if (response.status === 401) {
+          headers = await getAuthenticatedHeaders(true);
+          response = await fetch("/api/history", {
+            headers,
+            cache: "no-store"
+          });
+        }
+        const data = response.ok ? await response.json() : null;
+        if (cancelled) return;
         const remote = Array.isArray(data?.records)
           ? data.records.map((item: Record<string, unknown>) =>
               normalizeGenerationRecord(item)
             )
           : [];
         setRecords(mergeGenerationRecords(remote, readHistory()));
-      })
-      .catch(() => setRecords(readHistory()));
+      } catch {
+        if (!cancelled) setRecords(readHistory());
+      }
+    }
+
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const agents = useMemo(

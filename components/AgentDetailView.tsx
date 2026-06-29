@@ -32,7 +32,7 @@ import {
 } from "@/lib/history";
 import type { OfficialAgent } from "@/lib/official-agents";
 import {
-  getAuthHeaders,
+  getAuthenticatedHeaders,
   isSupabaseBrowserConfigured
 } from "@/lib/supabase-client";
 
@@ -80,9 +80,16 @@ export function AgentDetailView({
           return;
         }
 
-        const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
-          headers: getAuthHeaders()
+        let headers = await getAuthenticatedHeaders();
+        let response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
+          headers
         });
+        if (response.status === 401) {
+          headers = await getAuthenticatedHeaders(true);
+          response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
+            headers
+          });
+        }
         const data = (await response.json()) as {
           agent?: ApiAgentRow;
           error?: string;
@@ -120,12 +127,21 @@ export function AgentDetailView({
       return;
     }
 
-    fetch("/api/history", {
-      headers: getAuthHeaders(),
-      cache: "no-store"
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
+    async function loadHistory() {
+      try {
+        let headers = await getAuthenticatedHeaders();
+        let response = await fetch("/api/history", {
+          headers,
+          cache: "no-store"
+        });
+        if (response.status === 401) {
+          headers = await getAuthenticatedHeaders(true);
+          response = await fetch("/api/history", {
+            headers,
+            cache: "no-store"
+          });
+        }
+        const data = response.ok ? await response.json() : null;
         if (cancelled) return;
         const remote = Array.isArray(data?.records)
           ? data.records
@@ -135,10 +151,12 @@ export function AgentDetailView({
               .filter((record: GenerationRecord) => record.generatorId === historyAgentId)
           : [];
         setHistory(mergeGenerationRecords(remote, local));
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setHistory(local);
-      });
+      }
+    }
+
+    void loadHistory();
 
     return () => {
       cancelled = true;
@@ -223,11 +241,12 @@ export function AgentDetailView({
     setHistoryFeedback(null);
 
     try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(id)}/run`, {
+      let authHeaders = await getAuthenticatedHeaders();
+      const runRequest = () => fetch(`/api/agents/${encodeURIComponent(id)}/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...getAuthHeaders()
+          ...authHeaders
         },
         body: JSON.stringify({
           input,
@@ -237,6 +256,11 @@ export function AgentDetailView({
           }
         })
       });
+      let response = await runRequest();
+      if (response.status === 401) {
+        authHeaders = await getAuthenticatedHeaders(true);
+        response = await runRequest();
+      }
       const data = (await response.json()) as {
         output?: string;
         error?: string;
