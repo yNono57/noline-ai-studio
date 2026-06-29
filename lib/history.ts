@@ -10,6 +10,7 @@ export type GenerationRecord = {
   clientId?: string;
   clientName?: string;
   userPrompt?: string;
+  storage?: "supabase" | "local";
 };
 
 const STORAGE_KEY = "noline-generation-history";
@@ -75,16 +76,24 @@ export function normalizeGenerationRecord(
       values.prompt ||
       undefined,
     clientId: textValue(item.client_id) || undefined,
-    clientName: textValue(item.client_name) || undefined
+    clientName: textValue(item.client_name) || undefined,
+    storage: item.storage === "supabase" ? "supabase" : undefined
   };
 }
 
 export function mergeGenerationRecords(
   ...collections: GenerationRecord[][]
 ): GenerationRecord[] {
-  return Array.from(
-    new Map(collections.flat().map((record) => [record.id, record])).values()
-  ).sort(
+  const records = new Map<string, GenerationRecord>();
+  for (const record of collections.flat()) {
+    const existing = records.get(record.id);
+    if (existing?.storage === "supabase" && record.storage !== "supabase") {
+      continue;
+    }
+    records.set(record.id, record);
+  }
+
+  return Array.from(records.values()).sort(
     (left, right) =>
       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   );

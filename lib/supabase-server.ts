@@ -223,13 +223,15 @@ export async function saveAgentGeneration({
   agentId,
   agentName,
   userPrompt,
-  output
+  output,
+  clientId
 }: {
   userId: string;
   agentId: string;
   agentName: string;
   userPrompt: string;
   output: string;
+  clientId?: string;
 }) {
   let data: unknown;
   try {
@@ -239,7 +241,8 @@ export async function saveAgentGeneration({
       agent_name: agentName,
       user_prompt: userPrompt,
       input_values: { input: userPrompt },
-      result: output
+      result: output,
+      ...(clientId ? { client_id: clientId } : {})
     });
   } catch (error) {
     if (!isGenerationSchemaCompatibilityError(error)) throw error;
@@ -248,11 +251,68 @@ export async function saveAgentGeneration({
       generator_id: agentId,
       title: agentName,
       values: { input: userPrompt },
-      output
+      output,
+      ...(clientId ? { client_id: clientId } : {})
     });
   }
 
   return Array.isArray(data) ? data[0] : data;
+}
+
+export async function listWorkflows(userId: string) {
+  return supabaseAdmin(
+    `/rest/v1/workflows?user_id=eq.${encodeURIComponent(userId)}&select=*&order=updated_at.desc`,
+    { method: "GET" }
+  );
+}
+
+export async function getWorkflow(userId: string, id: string) {
+  return selectFirst<Record<string, unknown>>(
+    `/rest/v1/workflows?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`
+  );
+}
+
+export async function createWorkflow(payload: Record<string, unknown>) {
+  const data = await supabaseAdmin("/rest/v1/workflows", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function updateWorkflow(
+  userId: string,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  const data = await supabaseAdmin(
+    `/rest/v1/workflows?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function deleteWorkflow(userId: string, id: string) {
+  return supabaseAdmin(
+    `/rest/v1/workflows?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function listClientMemory(userId: string, clientId: string) {
+  const encodedUser = encodeURIComponent(userId);
+  const encodedClient = encodeURIComponent(clientId);
+  const [generations, workflows] = await Promise.all([
+    supabaseAdmin(
+      `/rest/v1/generations?user_id=eq.${encodedUser}&client_id=eq.${encodedClient}&select=*&order=created_at.desc&limit=3`,
+      { method: "GET" }
+    ),
+    supabaseAdmin(
+      `/rest/v1/workflows?user_id=eq.${encodedUser}&client_id=eq.${encodedClient}&select=*&order=updated_at.desc&limit=3`,
+      { method: "GET" }
+    )
+  ]);
+  return { generations, workflows };
 }
 
 export async function getGeneration(userId: string, id: string) {
@@ -265,6 +325,20 @@ export async function listGenerations(userId: string, limit = 50) {
   return supabaseAdmin(
     `/rest/v1/generations?user_id=eq.${encodeURIComponent(userId)}&select=*&order=created_at.desc&limit=${limit}`,
     { method: "GET" }
+  );
+}
+
+export async function deleteGeneration(userId: string, id: string) {
+  return supabaseAdmin(
+    `/rest/v1/generations?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function deleteGenerations(userId: string) {
+  return supabaseAdmin(
+    `/rest/v1/generations?user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
   );
 }
 

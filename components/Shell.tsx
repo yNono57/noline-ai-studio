@@ -15,13 +15,15 @@ import {
   Settings,
   Sparkles,
   UsersRound,
-  Wand2
+  Wand2,
+  Workflow
 } from "lucide-react";
 import { Brand } from "./Brand";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/generate", label: "Studio IA", icon: Sparkles },
   { href: "/agent-builder", label: "Agent Builder", icon: Bot },
   { href: "/clients", label: "Clients", icon: UsersRound },

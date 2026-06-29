@@ -12,6 +12,7 @@ import {
   Trash2
 } from "lucide-react";
 import { AgentReport } from "@/components/agent-report/AgentReport";
+import { AgentWorkflowRunner } from "@/components/AgentWorkflowRunner";
 import { GenerationHistoryCard } from "@/components/agent-report/GenerationHistoryCard";
 import { GenerationProgress } from "@/components/agent-report/GenerationProgress";
 import { CopyButton } from "@/components/CopyButton";
@@ -24,12 +25,14 @@ import {
 } from "@/lib/agents";
 import { readClients, type AgencyClient } from "@/lib/agency";
 import {
+  deleteHistoryRecord,
   normalizeGenerationRecord,
   mergeGenerationRecords,
   readHistory,
   saveRecord,
   type GenerationRecord
 } from "@/lib/history";
+import { deleteRemoteHistoryRecord } from "@/lib/history-api";
 import type { OfficialAgent } from "@/lib/official-agents";
 import {
   getAuthenticatedHeaders,
@@ -146,7 +149,10 @@ export function AgentDetailView({
         const remote = Array.isArray(data?.records)
           ? data.records
               .map((item: Record<string, unknown>) =>
-                normalizeGenerationRecord(item)
+                ({
+                  ...normalizeGenerationRecord(item),
+                  storage: "supabase" as const
+                })
               )
               .filter((record: GenerationRecord) => record.generatorId === historyAgentId)
           : [];
@@ -278,9 +284,12 @@ export function AgentDetailView({
       const historySaved = Boolean(data.historySaved);
       setRunHistorySaved(historySaved);
       if (historySaved && data.historyItem) {
-        const historyItem = normalizeGenerationRecord(
-          data.historyItem as unknown as Record<string, unknown>
-        );
+        const historyItem: GenerationRecord = {
+          ...normalizeGenerationRecord(
+            data.historyItem as unknown as Record<string, unknown>
+          ),
+          storage: "supabase"
+        };
         saveRecord(historyItem);
         setHistory((current) =>
           mergeGenerationRecords([historyItem], current)
@@ -343,6 +352,16 @@ export function AgentDetailView({
     }
   }
 
+  async function deleteLinkedHistoryRecord(record: GenerationRecord) {
+    if (record.storage === "supabase" && isSupabaseBrowserConfigured()) {
+      await deleteRemoteHistoryRecord(record.id);
+    }
+    deleteHistoryRecord(record.id);
+    setHistory((current) =>
+      current.filter((item) => item.id !== record.id)
+    );
+  }
+
   return (
     <div className="space-y-6">
       <section className="surface premium-border rounded-xl p-6 shadow-premium">
@@ -368,6 +387,12 @@ export function AgentDetailView({
             >
               <ArrowDown className="h-4 w-4" />
               Utiliser cet agent
+            </a>
+            <a
+              href="#workflow-agent"
+              className="inline-flex items-center gap-2 rounded-md border border-noline-orange/50 px-4 py-2 text-sm font-black text-white transition hover:bg-noline-orange hover:text-noline-black"
+            >
+              Lancer un workflow
             </a>
             <FavoriteButton type="agent" targetId={agent?.id || customAgent?.id || ""} label={name} />
             <CopyButton text={prompt} />
@@ -473,6 +498,12 @@ export function AgentDetailView({
         </section>
       ) : null}
 
+      <AgentWorkflowRunner
+        agentId={agent?.id || customAgent?.id || ""}
+        agentName={name}
+        clients={clients}
+      />
+
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <div className="space-y-6">
           <section className="surface premium-border rounded-xl p-5">
@@ -545,7 +576,11 @@ export function AgentDetailView({
         <div className="mt-4 grid gap-3">
           {history.length === 0 ? <p className="text-sm text-noline-muted">Aucune génération avec cet agent.</p> : null}
           {history.slice(0, 5).map((record) => (
-            <GenerationHistoryCard key={record.id} record={record} />
+            <GenerationHistoryCard
+              key={record.id}
+              record={record}
+              onDelete={() => deleteLinkedHistoryRecord(record)}
+            />
           ))}
         </div>
       </section>

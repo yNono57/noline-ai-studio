@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Trash2 } from "lucide-react";
 import { GenerationHistoryCard } from "./agent-report/GenerationHistoryCard";
 import {
+  clearHistory,
   deleteHistoryRecord,
   mergeGenerationRecords,
   normalizeGenerationRecord,
   readHistory,
   type GenerationRecord
 } from "@/lib/history";
+import {
+  deleteAllRemoteHistory,
+  deleteRemoteHistoryRecord
+} from "@/lib/history-api";
 import {
   getAuthenticatedHeaders,
   isSupabaseBrowserConfigured
@@ -19,6 +24,8 @@ export function HistoryView() {
   const [records, setRecords] = useState<GenerationRecord[]>([]);
   const [query, setQuery] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     if (!isSupabaseBrowserConfigured()) {
@@ -46,7 +53,10 @@ export function HistoryView() {
         if (cancelled) return;
         const remote = Array.isArray(data?.records)
           ? data.records.map((item: Record<string, unknown>) =>
-              normalizeGenerationRecord(item)
+              ({
+                ...normalizeGenerationRecord(item),
+                storage: "supabase" as const
+              })
             )
           : [];
         setRecords(mergeGenerationRecords(remote, readHistory()));
@@ -60,6 +70,47 @@ export function HistoryView() {
       cancelled = true;
     };
   }, []);
+
+  async function deleteRecord(record: GenerationRecord) {
+    setDeleteError("");
+    try {
+      if (record.storage === "supabase" && isSupabaseBrowserConfigured()) {
+        await deleteRemoteHistoryRecord(record.id);
+      }
+      deleteHistoryRecord(record.id);
+      setRecords((current) =>
+        current.filter((item) => item.id !== record.id)
+      );
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof Error ? caught.message : "Suppression impossible."
+      );
+      throw caught;
+    }
+  }
+
+  async function deleteAll() {
+    const confirmation = window.prompt(
+      "Cette action est irréversible. Tapez SUPPRIMER pour effacer tout l’historique."
+    );
+    if (confirmation !== "SUPPRIMER") return;
+
+    setDeletingAll(true);
+    setDeleteError("");
+    try {
+      if (isSupabaseBrowserConfigured()) {
+        await deleteAllRemoteHistory();
+      }
+      clearHistory();
+      setRecords([]);
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof Error ? caught.message : "Suppression impossible."
+      );
+    } finally {
+      setDeletingAll(false);
+    }
+  }
 
   const agents = useMemo(
     () => Array.from(new Map(records.map((record) => [record.generatorId, record.title])).entries()),
@@ -82,11 +133,28 @@ export function HistoryView() {
 
   return (
     <section>
-      <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
         <p className="text-sm font-black uppercase tracking-[0.24em] text-noline-orange">Historique</p>
         <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">Toutes les générations</h1>
         <p className="mt-3 text-sm text-noline-muted">Retrouvez, filtrez et réutilisez chaque résultat produit.</p>
+        </div>
+        <button
+          type="button"
+          disabled={deletingAll || records.length === 0}
+          onClick={() => void deleteAll()}
+          className="inline-flex items-center justify-center gap-2 rounded-md border border-red-400/30 px-4 py-2 text-sm font-black text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" />
+          {deletingAll ? "Suppression..." : "Tout supprimer"}
+        </button>
       </div>
+
+      {deleteError ? (
+        <p className="mt-4 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">
+          {deleteError}
+        </p>
+      ) : null}
 
       <div className="surface premium-border mt-7 grid gap-3 rounded-xl p-4 sm:grid-cols-[1fr_15rem]">
         <label className="flex items-center gap-3 rounded-md border border-white/10 bg-noline-black px-3">
@@ -110,11 +178,7 @@ export function HistoryView() {
                 ...record,
                 userPrompt: record.userPrompt || formatValues(record.values)
               }}
-              onDelete={
-                isSupabaseBrowserConfigured()
-                  ? undefined
-                  : () => setRecords(deleteHistoryRecord(record.id))
-              }
+              onDelete={() => deleteRecord(record)}
             />
           ))
         )}

@@ -11,15 +11,34 @@ export function GenerationHistoryCard({
   onDelete
 }: {
   record: GenerationRecord;
-  onDelete?: () => void;
+  onDelete?: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function copy() {
     await navigator.clipboard.writeText(record.output);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  async function remove() {
+    if (
+      !onDelete ||
+      !window.confirm("Supprimer définitivement cette génération ?")
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await onDelete();
+    } catch {
+      // The parent view owns and displays the deletion error.
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -34,7 +53,15 @@ export function GenerationHistoryCard({
           <HistoryAction label={open ? "Fermer" : "Voir"} icon={open ? EyeOff : Eye} onClick={() => setOpen((value) => !value)} />
           <HistoryAction label={copied ? "Copié" : "Copier"} icon={copied ? Check : Clipboard} onClick={() => void copy()} />
           <HistoryAction label="Exporter" icon={Download} onClick={() => exportMarkdown(record.output, record.title)} />
-          {onDelete ? <HistoryAction label="Supprimer" icon={Trash2} onClick={onDelete} danger /> : null}
+          {onDelete ? (
+            <HistoryAction
+              label={deleting ? "Suppression..." : "Supprimer"}
+              icon={Trash2}
+              onClick={() => void remove()}
+              danger
+              disabled={deleting}
+            />
+          ) : null}
         </div>
       </div>
       {open ? (
@@ -50,22 +77,25 @@ function HistoryAction({
   label,
   icon: Icon,
   onClick,
-  danger = false
+  danger = false,
+  disabled = false
 }: {
   label: string;
   icon: typeof Eye;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-black transition ${
         danger
           ? "border-red-400/30 text-red-200 hover:bg-red-500/10"
           : "border-white/10 text-white hover:border-noline-orange"
-      }`}
+      } disabled:cursor-not-allowed disabled:opacity-50`}
     >
       <Icon className="h-3.5 w-3.5" />
       {label}
