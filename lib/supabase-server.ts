@@ -302,7 +302,7 @@ export async function deleteWorkflow(userId: string, id: string) {
 export async function listClientMemory(userId: string, clientId: string) {
   const encodedUser = encodeURIComponent(userId);
   const encodedClient = encodeURIComponent(clientId);
-  const [generations, workflows] = await Promise.all([
+  const [generationResult, workflowResult] = await Promise.allSettled([
     supabaseAdmin(
       `/rest/v1/generations?user_id=eq.${encodedUser}&client_id=eq.${encodedClient}&select=*&order=created_at.desc&limit=3`,
       { method: "GET" }
@@ -312,7 +312,12 @@ export async function listClientMemory(userId: string, clientId: string) {
       { method: "GET" }
     )
   ]);
-  return { generations, workflows };
+  return {
+    generations:
+      generationResult.status === "fulfilled" ? generationResult.value : [],
+    workflows:
+      workflowResult.status === "fulfilled" ? workflowResult.value : []
+  };
 }
 
 export async function getGeneration(userId: string, id: string) {

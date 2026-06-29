@@ -12,6 +12,17 @@ create table if not exists public.workflows (
   updated_at timestamptz not null default now()
 );
 
+alter table public.workflows
+  add column if not exists user_id uuid references auth.users(id) on delete cascade,
+  add column if not exists agent_id text,
+  add column if not exists client_id text,
+  add column if not exists title text,
+  add column if not exists status text not null default 'draft',
+  add column if not exists steps jsonb not null default '[]'::jsonb,
+  add column if not exists result jsonb,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
 create index if not exists workflows_user_updated_at_idx
   on public.workflows(user_id, updated_at desc);
 create index if not exists workflows_user_agent_idx

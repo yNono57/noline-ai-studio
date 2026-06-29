@@ -27,12 +27,15 @@ const STEP_TITLES = [
   "Plan d’action + prochaine étape"
 ] as const;
 
+export const maxDuration = 300;
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   let workflowId = "";
   let userId = "";
+  let currentSteps: WorkflowStep[] = [];
 
   try {
     if (!isSupabaseServerConfigured()) {
@@ -68,6 +71,7 @@ export async function POST(
       title,
       status: "pending"
     }));
+    currentSteps = steps;
     const created = await createWorkflow({
       user_id: user.id,
       agent_id: agentId,
@@ -121,6 +125,7 @@ export async function POST(
       result: { output: finalOutput },
       updated_at: new Date().toISOString()
     });
+    if (!completed) throw new Error("Completed workflow could not be reloaded.");
     await saveAgentGeneration({
       userId: user.id,
       agentId,
@@ -137,8 +142,13 @@ export async function POST(
     });
   } catch (error) {
     if (workflowId && userId) {
+      const failedSteps = currentSteps.map((step) =>
+        step.status === "running" ? { ...step, status: "failed" as const } : step
+      );
       await updateWorkflow(userId, workflowId, {
         status: "failed",
+        steps: failedSteps,
+        result: { error: "Exécution interrompue." },
         updated_at: new Date().toISOString()
       }).catch(() => undefined);
     }
