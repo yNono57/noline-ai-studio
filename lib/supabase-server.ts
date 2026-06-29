@@ -255,6 +255,19 @@ export async function saveAgentGeneration({
   return Array.isArray(data) ? data[0] : data;
 }
 
+export async function getGeneration(userId: string, id: string) {
+  return selectFirst<Record<string, unknown>>(
+    `/rest/v1/generations?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`
+  );
+}
+
+export async function listGenerations(userId: string, limit = 50) {
+  return supabaseAdmin(
+    `/rest/v1/generations?user_id=eq.${encodeURIComponent(userId)}&select=*&order=created_at.desc&limit=${limit}`,
+    { method: "GET" }
+  );
+}
+
 function insertGeneration(payload: Record<string, unknown>) {
   return supabaseAdmin("/rest/v1/generations", {
     method: "POST",

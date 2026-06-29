@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import {
   getAgent,
+  getGeneration,
   getUserFromRequest,
   isSupabaseServerConfigured,
   saveAgentGeneration
 } from "@/lib/supabase-server";
 import { getOfficialAgent } from "@/lib/official-agents";
+import {
+  normalizeGenerationRecord,
+  type GenerationRecord
+} from "@/lib/history";
 import { logGenerationError } from "@/lib/server-diagnostics";
 
 interface RunAgentBody {
@@ -111,18 +116,36 @@ export async function POST(
     }
 
     let historySaved = false;
+    let historySaveFailed = false;
+    let historyItem: GenerationRecord | null = null;
     if (userId) {
       try {
         stage = "save_history";
-        await saveAgentGeneration({
+        const savedGeneration = await saveAgentGeneration({
           userId,
           agentId,
           agentName,
           userPrompt: input,
           output
         });
+
+        const generationId = readRecordId(savedGeneration);
+        if (!generationId) {
+          throw new Error("Supabase insert succeeded without returning a generation id.");
+        }
+
+        stage = "verify_history";
+        const visibleGeneration = await getGeneration(userId, generationId);
+        if (!visibleGeneration) {
+          throw new Error(
+            `Generation ${generationId} was inserted but is not readable for user ${userId}.`
+          );
+        }
+        historyItem = normalizeGenerationRecord(visibleGeneration);
         historySaved = true;
       } catch (historyError) {
+        historySaveFailed = true;
+        console.error("[agents/:id/run] Supabase history persistence failed", historyError);
         logGenerationError({
           route: "/api/agents/[id]/run",
           stage: "save_history",
@@ -132,7 +155,13 @@ export async function POST(
       }
     }
 
-    return NextResponse.json({ output, demo, historySaved });
+    return NextResponse.json({
+      output,
+      demo,
+      historySaved,
+      historyError: historySaveFailed,
+      historyItem
+    });
   } catch (error) {
     logGenerationError({
       route: "/api/agents/[id]/run",
@@ -149,6 +178,11 @@ export async function POST(
 
 function readText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readRecordId(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  return readText((value as Record<string, unknown>).id);
 }
 
 function readUnknownText(value: unknown) {

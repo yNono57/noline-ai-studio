@@ -120,13 +120,18 @@ export function AgentDetailView({
       return;
     }
 
-    fetch("/api/creations", { headers: getAuthHeaders() })
+    fetch("/api/history", {
+      headers: getAuthHeaders(),
+      cache: "no-store"
+    })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (cancelled) return;
-        const remote = Array.isArray(data?.texts)
-          ? data.texts
-              .map(normalizeGenerationRecord)
+        const remote = Array.isArray(data?.records)
+          ? data.records
+              .map((item: Record<string, unknown>) =>
+                normalizeGenerationRecord(item)
+              )
               .filter((record: GenerationRecord) => record.generatorId === historyAgentId)
           : [];
         setHistory(mergeGenerationRecords(remote, local));
@@ -237,6 +242,8 @@ export function AgentDetailView({
         error?: string;
         demo?: boolean;
         historySaved?: boolean;
+        historyError?: boolean;
+        historyItem?: GenerationRecord | null;
       };
       if (!response.ok || !data.output) {
         throw new Error(data.error || "L’agent n’a produit aucune réponse.");
@@ -246,10 +253,29 @@ export function AgentDetailView({
       setRunDemo(Boolean(data.demo));
       const historySaved = Boolean(data.historySaved);
       setRunHistorySaved(historySaved);
-      if (historySaved) {
+      if (historySaved && data.historyItem) {
+        const historyItem = normalizeGenerationRecord(
+          data.historyItem as unknown as Record<string, unknown>
+        );
+        saveRecord(historyItem);
+        setHistory((current) =>
+          mergeGenerationRecords([historyItem], current)
+        );
+        setHistoryVersion((current) => current + 1);
         setHistoryFeedback({
           type: "success",
           message: "Génération sauvegardée dans l’historique"
+        });
+      } else if (historySaved) {
+        setRunHistorySaved(false);
+        setHistoryFeedback({
+          type: "error",
+          message: "La sauvegarde n’a pas pu être confirmée dans l’historique"
+        });
+      } else if (data.historyError) {
+        setHistoryFeedback({
+          type: "error",
+          message: "Erreur lors de la sauvegarde"
         });
       }
     } catch (caught) {

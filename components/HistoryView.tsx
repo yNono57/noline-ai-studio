@@ -26,11 +26,16 @@ export function HistoryView() {
       return;
     }
 
-    fetch("/api/creations", { headers: getAuthHeaders() })
+    fetch("/api/history", {
+      headers: getAuthHeaders(),
+      cache: "no-store"
+    })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
-        const remote = Array.isArray(data?.texts)
-          ? data.texts.map(normalizeGenerationRecord)
+        const remote = Array.isArray(data?.records)
+          ? data.records.map((item: Record<string, unknown>) =>
+              normalizeGenerationRecord(item)
+            )
           : [];
         setRecords(mergeGenerationRecords(remote, readHistory()));
       })

@@ -26,7 +26,10 @@ export function readHistory(): GenerationRecord[] {
 }
 
 export function saveRecord(record: GenerationRecord) {
-  const next = [record, ...readHistory()].slice(0, 30);
+  const next = [
+    record,
+    ...readHistory().filter((item) => item.id !== record.id)
+  ].slice(0, 30);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   return next;
 }
@@ -45,8 +48,15 @@ export function normalizeGenerationRecord(
   item: Record<string, unknown>
 ): GenerationRecord {
   const values = normalizeValues(item.input_values || item.values);
-  const generatorId = textValue(item.agent_id) || textValue(item.generator_id) || "unknown";
-  const createdAt = textValue(item.created_at) || new Date().toISOString();
+  const generatorId =
+    textValue(item.agent_id) ||
+    textValue(item.generator_id) ||
+    textValue(item.generatorId) ||
+    "unknown";
+  const createdAt =
+    textValue(item.created_at) ||
+    textValue(item.createdAt) ||
+    new Date().toISOString();
 
   return {
     id: textValue(item.id) || `${generatorId}-${createdAt}`,
@@ -60,6 +70,7 @@ export function normalizeGenerationRecord(
       "Contenu indisponible pour cette génération.",
     userPrompt:
       textValue(item.user_prompt) ||
+      textValue(item.userPrompt) ||
       values.input ||
       values.prompt ||
       undefined,
