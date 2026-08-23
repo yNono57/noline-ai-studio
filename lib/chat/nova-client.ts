@@ -53,6 +53,26 @@ export async function createConversation(projectId: string, input: CreateConvers
   )).conversation;
 }
 
+export async function setProjectStatus(projectId: string, status: "active" | "archived") {
+  return (await request<{ project: Project }>(`/api/nova/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH", body: JSON.stringify({ status })
+  })).project;
+}
+
+export async function deleteProject(projectId: string) {
+  await request<void>(`/api/nova/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+}
+
+export async function setConversationStatus(conversationId: string, status: "active" | "archived") {
+  return (await request<{ conversation: Conversation }>(`/api/nova/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "PATCH", body: JSON.stringify({ status })
+  })).conversation;
+}
+
+export async function deleteConversation(conversationId: string) {
+  await request<void>(`/api/nova/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+}
+
 export async function listMessages(conversationId: string) {
   return (await request<{ messages: Message[] }>(
     `/api/nova/conversations/${encodeURIComponent(conversationId)}/messages`
@@ -94,7 +114,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     response = await run(authHeaders);
   }
 
-  const data = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+  const data: (T & { error?: string }) | null = response.status === 204
+    ? ({} as T & { error?: string })
+    : await response.json().catch(() => null) as (T & { error?: string }) | null;
 
   if (!response.ok || !data) {
     if (response.status === 401) throw sessionExpired();

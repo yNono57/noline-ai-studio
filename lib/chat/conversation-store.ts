@@ -109,6 +109,16 @@ export async function createProject(
   });
 }
 
+export async function setProjectStatus(userId: string, projectId: string, status: ConversationStatus): Promise<Project> {
+  await getProject(userId, projectId);
+  return updateOne<Project>(`/rest/v1/projects?id=eq.${encode(projectId)}`, { status });
+}
+
+export async function deleteProject(userId: string, projectId: string): Promise<void> {
+  await getProject(userId, projectId);
+  await deleteOwned(`/rest/v1/projects?id=eq.${encode(projectId)}`);
+}
+
 export async function listConversations(
   userId: string,
   projectId: string
@@ -156,6 +166,16 @@ export async function createConversation(
     model_key: input.modelKey.trim(),
     status: input.status ?? "active"
   });
+}
+
+export async function setConversationStatus(userId: string, conversationId: string, status: ConversationStatus): Promise<Conversation> {
+  await getConversation(userId, conversationId);
+  return updateOne<Conversation>(`/rest/v1/conversations?id=eq.${encode(conversationId)}`, { status });
+}
+
+export async function deleteConversation(userId: string, conversationId: string): Promise<void> {
+  await getConversation(userId, conversationId);
+  await deleteOwned(`/rest/v1/conversations?id=eq.${encode(conversationId)}`);
 }
 
 export async function listMessages(
@@ -241,6 +261,25 @@ async function insertOne<T>(path: string, body: Record<string, unknown>): Promis
     return row;
   } catch (error) {
     if (error instanceof ConversationStoreError) throw error;
+    throw supabaseError(error);
+  }
+}
+
+async function updateOne<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  try {
+    const data = await supabaseAdmin(path, { method: "PATCH", body: JSON.stringify(body) });
+    const row = Array.isArray(data) ? (data[0] as T | undefined) : undefined;
+    if (!row) throw new Error("Supabase n'a retourné aucune ressource mise à jour.");
+    return row;
+  } catch (error) {
+    throw supabaseError(error);
+  }
+}
+
+async function deleteOwned(path: string): Promise<void> {
+  try {
+    await supabaseAdmin(path, { method: "DELETE" });
+  } catch (error) {
     throw supabaseError(error);
   }
 }

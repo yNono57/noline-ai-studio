@@ -23,7 +23,7 @@ const products: Product[] = [
     { label: "Vidéos", future: true }, { href: "/generators", label: "Bibliothèque" }
   ] },
   { key: "forge", label: "Forge", icon: Code2, items: [
-    { label: "Agent de code", future: true }, { label: "Projets", future: true },
+    { href: "/forge", label: "Agent de code" }, { label: "Projets", future: true },
     { label: "Repositories", future: true }, { label: "Sessions", future: true }
   ] },
   { key: "apex", label: "Apex", icon: Crown, items: [

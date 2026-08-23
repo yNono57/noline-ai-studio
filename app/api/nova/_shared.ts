@@ -60,6 +60,14 @@ export async function parseNovaMessageInput(request: Request) {
   };
 }
 
+export async function parseStatusInput(request: Request) {
+  const body = await parseObject(request);
+  if (body.status !== "active" && body.status !== "archived") {
+    throw invalid("status doit être active ou archived.");
+  }
+  return body.status;
+}
+
 export function routeErrorResponse(error: unknown) {
   if (error instanceof NovaApiError) {
     return NextResponse.json({ error: error.message }, { status: error.status });

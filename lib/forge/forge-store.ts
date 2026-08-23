@@ -1,0 +1,35 @@
+import { supabaseAdmin } from "../supabase-server";
+
+export type ForgeStatus = "active" | "archived";
+export type ForgeMessageRole = "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
+export type ForgeProject = { id: string; user_id: string; name: string; description: string | null; repository_provider: string | null; repository_identifier: string | null; default_branch: string | null; status: ForgeStatus; created_at: string; updated_at: string };
+export type ForgeConversation = { id: string; forge_project_id: string; title: string; model_key: string; status: ForgeStatus; created_at: string; updated_at: string };
+export type ForgeMessage = { id: string; conversation_id: string; role: ForgeMessageRole; content: string; metadata: Record<string, unknown> | null; created_at: string };
+
+type ForgeStoreErrorCode = "UNAUTHENTICATED" | "INVALID_INPUT" | "NOT_FOUND" | "SUPABASE_ERROR";
+export class ForgeStoreError extends Error { constructor(readonly code: ForgeStoreErrorCode, message: string) { super(message); this.name = "ForgeStoreError"; } }
+
+export async function listForgeProjects(userId: string) { requireValue(userId, "UNAUTHENTICATED", "Authentification requise."); return selectMany<ForgeProject>(`/rest/v1/forge_projects?user_id=eq.${encode(userId)}&select=*&order=updated_at.desc`); }
+export async function getForgeProject(userId: string, projectId: string) { requireValue(userId, "UNAUTHENTICATED", "Authentification requise."); requireValue(projectId, "INVALID_INPUT", "projectId est requis."); const project = await selectOne<ForgeProject>(`/rest/v1/forge_projects?id=eq.${encode(projectId)}&user_id=eq.${encode(userId)}&select=*&limit=1`); if (!project) throw new ForgeStoreError("NOT_FOUND", "Projet Forge introuvable ou inaccessible."); return project; }
+export async function createForgeProject(userId: string, input: { name: string; description?: string | null }) { requireValue(userId, "UNAUTHENTICATED", "Authentification requise."); requireValue(input.name, "INVALID_INPUT", "name ne peut pas être vide."); return insertOne<ForgeProject>("/rest/v1/forge_projects", { user_id: userId, name: input.name.trim(), description: input.description?.trim() || null, repository_provider: null, repository_identifier: null, default_branch: null, status: "active" }); }
+export async function setForgeProjectStatus(userId: string, projectId: string, status: ForgeStatus) { await getForgeProject(userId, projectId); return updateOne<ForgeProject>(`/rest/v1/forge_projects?id=eq.${encode(projectId)}`, { status }); }
+export async function deleteForgeProject(userId: string, projectId: string) { await getForgeProject(userId, projectId); await deleteOwned(`/rest/v1/forge_projects?id=eq.${encode(projectId)}`); }
+
+export async function listForgeConversations(userId: string, projectId: string) { await getForgeProject(userId, projectId); return selectMany<ForgeConversation>(`/rest/v1/forge_conversations?forge_project_id=eq.${encode(projectId)}&select=*&order=updated_at.desc`); }
+export async function getForgeConversation(userId: string, conversationId: string) { requireValue(userId, "UNAUTHENTICATED", "Authentification requise."); requireValue(conversationId, "INVALID_INPUT", "conversationId est requis."); const conversation = await selectOne<ForgeConversation>(`/rest/v1/forge_conversations?id=eq.${encode(conversationId)}&select=*&limit=1`); if (!conversation) throw new ForgeStoreError("NOT_FOUND", "Conversation Forge introuvable ou inaccessible."); await getForgeProject(userId, conversation.forge_project_id); return conversation; }
+export async function createForgeConversation(userId: string, projectId: string, input: { title: string; modelKey: string }) { await getForgeProject(userId, projectId); requireValue(input.title, "INVALID_INPUT", "title ne peut pas être vide."); requireValue(input.modelKey, "INVALID_INPUT", "model_key ne peut pas être vide."); return insertOne<ForgeConversation>("/rest/v1/forge_conversations", { forge_project_id: projectId, title: input.title.trim(), model_key: input.modelKey.trim(), status: "active" }); }
+export async function setForgeConversationStatus(userId: string, conversationId: string, status: ForgeStatus) { await getForgeConversation(userId, conversationId); return updateOne<ForgeConversation>(`/rest/v1/forge_conversations?id=eq.${encode(conversationId)}`, { status }); }
+export async function deleteForgeConversation(userId: string, conversationId: string) { await getForgeConversation(userId, conversationId); await deleteOwned(`/rest/v1/forge_conversations?id=eq.${encode(conversationId)}`); }
+
+export async function listForgeMessages(userId: string, conversationId: string) { await getForgeConversation(userId, conversationId); return selectMany<ForgeMessage>(`/rest/v1/forge_messages?conversation_id=eq.${encode(conversationId)}&select=*&order=created_at.asc,id.asc`); }
+export async function createForgeMessage(userId: string, conversationId: string, input: { role: ForgeMessageRole; content: string; metadata?: Record<string, unknown> | null }) { await getForgeConversation(userId, conversationId); requireValue(input.content, "INVALID_INPUT", "content ne peut pas être vide."); return insertOne<ForgeMessage>("/rest/v1/forge_messages", { conversation_id: conversationId, role: input.role, content: input.content.trim(), metadata: input.metadata ?? null }); }
+
+function requireValue(value: string, code: ForgeStoreErrorCode, message: string) { if (!value?.trim()) throw new ForgeStoreError(code, message); }
+function encode(value: string) { return encodeURIComponent(value); }
+async function selectMany<T>(path: string): Promise<T[]> { try { const data = await supabaseAdmin(path, { method: "GET" }); return Array.isArray(data) ? data as T[] : []; } catch (error) { throw databaseError(error); } }
+async function selectOne<T>(path: string) { return (await selectMany<T>(path))[0] ?? null; }
+async function insertOne<T>(path: string, body: Record<string, unknown>): Promise<T> { return mutateOne<T>(path, "POST", body); }
+async function updateOne<T>(path: string, body: Record<string, unknown>): Promise<T> { return mutateOne<T>(path, "PATCH", body); }
+async function mutateOne<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>): Promise<T> { try { const data = await supabaseAdmin(path, { method, body: JSON.stringify(body) }); if (!Array.isArray(data) || !data[0]) throw new Error("Réponse Supabase vide."); return data[0] as T; } catch (error) { throw databaseError(error); } }
+async function deleteOwned(path: string) { try { await supabaseAdmin(path, { method: "DELETE" }); } catch (error) { throw databaseError(error); } }
+function databaseError(error: unknown) { if (error instanceof ForgeStoreError) return error; return new ForgeStoreError("SUPABASE_ERROR", "L’opération Supabase Forge a échoué."); }
