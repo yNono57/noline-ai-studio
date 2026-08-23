@@ -117,14 +117,21 @@ function getSupabaseBrowserSession(): AuthSession | null {
 }
 
 async function authRequest(path: string, body: Record<string, string>) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const configuredUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!url || !anonKey) {
+  if (!configuredUrl || !anonKey) {
     throw new Error("Supabase n'est pas configure. Ajoutez les variables dans .env.local.");
   }
 
-  const response = await fetch(`${url}/auth/v1${path}`, {
+  let authUrl: URL;
+  try {
+    authUrl = new URL(`/auth/v1${path}`, ensureTrailingSlash(configuredUrl));
+  } catch {
+    throw new Error("NEXT_PUBLIC_SUPABASE_URL n'est pas une URL valide.");
+  }
+
+  const response = await fetch(authUrl, {
     method: "POST",
     headers: {
       apikey: anonKey,
@@ -132,13 +139,31 @@ async function authRequest(path: string, body: Record<string, string>) {
     },
     body: JSON.stringify(body)
   });
-  const data = await response.json();
+  const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      response.ok
+        ? "Le service d'authentification a renvoye une reponse non JSON."
+        : `Le service d'authentification est inaccessible (HTTP ${response.status}). Verifiez NEXT_PUBLIC_SUPABASE_URL.`
+    );
+  }
+
+  const data = (await response.json()) as {
+    error_description?: string;
+    msg?: string;
+    message?: string;
+  } & Record<string, unknown>;
 
   if (!response.ok) {
     throw new Error(data.error_description || data.msg || data.message || "Authentification impossible.");
   }
 
   return data;
+}
+
+function ensureTrailingSlash(value: string) {
+  return value.endsWith("/") ? value : `${value}/`;
 }
 
 function normalizeSession(data: unknown): AuthSession | null {
