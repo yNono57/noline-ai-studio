@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createForgeMessage, getForgeConversation, getForgeProject, listForgeMessages, type ForgeMessage } from "@/lib/forge/forge-store";
+import { createForgeMessage, ensureForgeConversationTitle, getForgeConversation, getForgeProject, listForgeMessages, type ForgeMessage } from "@/lib/forge/forge-store";
 import { ForgeGenerationError, generateForgeReply } from "@/lib/forge/forge-openai";
 import { authenticateForge, forgeErrorResponse, parseForgeMessageInput } from "../../../_shared";
 import { requireActiveGitHubConnection } from "@/lib/forge/github-store";
@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: Context) {
     if (userMessage) {
       const retryMessage = userMessage;
       const existingAssistant = history.find((message) => message.role === "ASSISTANT" && message.metadata?.reply_to_message_id === retryMessage.id);
-      if (existingAssistant) return NextResponse.json({ user_message: retryMessage, assistant_message: existingAssistant });
+      if (existingAssistant) return NextResponse.json({ user_message: retryMessage, assistant_message: existingAssistant, conversation: await ensureForgeConversationTitle(user.id, conversationId, retryMessage.content) });
     }
 
     let repositoryContext = "";
@@ -53,13 +53,14 @@ export async function POST(request: Request, { params }: Context) {
       userMessage = await createForgeMessage(user.id, conversationId, { role: "USER", content: input.content });
       history = [...history, userMessage];
     }
+    const titledConversation = await ensureForgeConversationTitle(user.id, conversationId, userMessage.content);
 
     try {
       const reply = await generateForgeReply(history, repositoryContext);
       const assistantMessage = await createForgeMessage(user.id, conversationId, {
         role: "ASSISTANT", content: reply.text, metadata: { model: reply.model, reply_to_message_id: userMessage.id }
       });
-      return NextResponse.json({ user_message: userMessage, assistant_message: assistantMessage }, { status: 201 });
+      return NextResponse.json({ user_message: userMessage, assistant_message: assistantMessage, conversation: titledConversation }, { status: 201 });
     } catch (error) {
       if (error instanceof ForgeGenerationError) {
         return NextResponse.json({ error: error.message, user_message: userMessage }, { status: 502 });

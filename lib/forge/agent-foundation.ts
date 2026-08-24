@@ -31,6 +31,9 @@ export type ForgeAgentRunnerDependencies = {
   now(): string;
 };
 
+export function createInitialAgentPlan(_objective: string) {
+  return ["Inspecter les fichiers nécessaires", "Exécuter la mission dans le sandbox", "Valider le résultat et produire le diff"];
+}
 export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
   async function run(userId: string, conversationId: string, objectiveInput: unknown) {
     if (!userId.trim()) throw new ForgeAgentError("UNAUTHENTICATED", "Authentification requise.");
@@ -39,12 +42,15 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     const steps: ForgeAgentStep[] = []; let toolCalls = 0, validationFailed = false;
     try {
       run = await deps.updateRun(userId, run.runId, { status: "PLANNING", startedAt: deps.now(), lastActivityAt: deps.now() });
-      for (let number = 1; number <= FORGE_AGENT_LIMITS.maxSteps; number += 1) {
+      if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
+      const initialPlan = createInitialAgentPlan(objective), planTime = deps.now();
+      steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: 1, type: "PLAN", summary: "Plan initial Forge", tool: null, input: {}, resultSummary: initialPlan.join("\n"), status: "COMPLETED", startedAt: planTime, completedAt: planTime }));
+      run = await deps.updateRun(userId, run.runId, { status: "RUNNING", plan: initialPlan, lastActivityAt: planTime });
+      for (let number = 2; number <= FORGE_AGENT_LIMITS.maxSteps; number += 1) {
         if (Date.now() - started > FORGE_AGENT_LIMITS.maxRuntimeSeconds * 1000) throw new ForgeAgentError("LIMIT", "Durée maximale du run atteinte.");
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
         const decision = await deps.model.decide({ objective, repository: context.repository, branch: context.branch, baseCommitSha: context.baseCommitSha, status: run.status, steps: steps.slice(-12).map(({ type, summary, resultSummary }) => ({ type, summary, resultSummary: resultSummary?.slice(0, 8_000) || null })) });
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
-        if (number === 1 && decision.type !== "PLAN") throw new ForgeAgentError("MODEL", "Le premier pas du run doit être un PLAN.");
         const now = deps.now();
         if (decision.type === "PLAN") { const plan = decision.plan.slice(0, 8).map((item) => sanitizeAgentText(item, 500)); steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "PLAN", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: plan.join("\n"), status: "COMPLETED", startedAt: now, completedAt: now })); run = await deps.updateRun(userId, run.runId, { status: "RUNNING", plan, lastActivityAt: now }); continue; }
         if (decision.type === "TOOL_CALL") {

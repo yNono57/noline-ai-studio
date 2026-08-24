@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Archive, Check, Code2, Copy, GitBranch, Github, Loader2, MoreHorizontal, Plus, RotateCcw, Send, TerminalSquare, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Archive, Check, Code2, Copy, GitBranch, Github, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Send, TerminalSquare, Trash2, X } from "lucide-react";
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
 import { ForgeGitHubPanel } from "@/components/ForgeGitHubPanel";
@@ -15,6 +15,7 @@ import {
   listForgeConversations,
   listForgeMessages,
   listForgeProjects,
+  renameForgeConversation,
   sendForgeMessage,
   setForgeProjectStatus
 } from "@/lib/forge/forge-client";
@@ -41,6 +42,10 @@ export function ForgeWorkspace() {
   const [agentLaunchRequest, setAgentLaunchRequest] = useState<{ id: string; objective: string } | null>(null);
   const [agentAvailable, setAgentAvailable] = useState(false);
   const [agentActive, setAgentActive] = useState(false);
+  const [editingConversationId, setEditingConversationId] = useState("");
+  const [editingConversationTitle, setEditingConversationTitle] = useState("");
+  const messagesViewport = useRef<HTMLDivElement | null>(null);
+  const followMessages = useRef(true);
 
   const handleError = useCallback((caught: unknown) => {
     if (caught instanceof ForgeClientError && caught.status === 401) {
@@ -93,6 +98,13 @@ export function ForgeWorkspace() {
     return () => { active = false; };
   }, [authBlocked, conversationId, handleError]);
 
+  useEffect(() => {
+    if (!followMessages.current || !messagesViewport.current) return;
+    const frame = window.requestAnimationFrame(() => messagesViewport.current?.scrollTo({ top: messagesViewport.current.scrollHeight, behavior: "smooth" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversationId, messages.length]);
+
+  const selectConversation = useCallback((id: string) => { followMessages.current = true; setConversationId(id); }, []);
   async function addProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!name.trim() || working) return;
@@ -114,6 +126,14 @@ export function ForgeWorkspace() {
     } catch (error) { handleError(error); } finally { setWorking(false); }
   }
 
+  async function saveConversationTitle(conversation: ForgeConversation) {
+    const title = editingConversationTitle.trim();
+    if (!title || working) return;
+    setWorking(true); setError("");
+    try { const updated = await renameForgeConversation(conversation.id, title); setConversations((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditingConversationId(""); }
+    catch (caught) { handleError(caught); }
+    finally { setWorking(false); }
+  }
   async function changeProjectStatus(project: ForgeProject) {
     if (working) return;
     setWorking(true); setError("");
@@ -139,6 +159,7 @@ export function ForgeWorkspace() {
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!conversationId || !draft.trim() || working || agentActive) return;
+    followMessages.current = true; messagesViewport.current?.scrollTo({ top: messagesViewport.current.scrollHeight, behavior: "smooth" });
     if (composerMode === "agent") {
       if (!agentAvailable) { setError("Un runtime Daytona READY est requis pour exécuter cette mission."); return; }
       const objective = draft.trim(); setError(""); setNotice("Mission transmise à l’Agent Forge…");
@@ -149,6 +170,7 @@ export function ForgeWorkspace() {
     try {
       const result = await sendForgeMessage(conversationId, draft.trim(), retryMessageId, (contextByConversation[conversationId] || []).map((file) => file.path));
       setMessages((current) => mergeMessages(current, [result.user_message, result.assistant_message]));
+      setConversations((current) => current.map((item) => item.id === result.conversation.id ? result.conversation : item));
       setDraft(""); setRetryMessageId(null); setNotice("");
     } catch (caught) {
       if (caught instanceof ForgeClientError && caught.userMessage) {
@@ -175,14 +197,14 @@ export function ForgeWorkspace() {
         <div className="flex items-center justify-between"><h2 className="text-sm font-black text-white">Projets Forge</h2>{loading ? <Loader2 className="h-4 w-4 animate-spin text-noline-orange" /> : null}</div>
         <div className="mt-2 flex gap-1"><ForgeFilter active={projectView === "active"} onClick={() => { setProjectView("active"); setProjectId(projects.find((item) => item.status === "active")?.id || ""); }}>Actifs</ForgeFilter><ForgeFilter active={projectView === "archived"} onClick={() => { setProjectView("archived"); setProjectId(projects.find((item) => item.status === "archived")?.id || ""); }}>Archivés</ForgeFilter></div><div className="mt-3 max-h-48 space-y-2 overflow-y-auto">{visibleProjects.map((item) => <ForgeProjectRow key={item.id} project={item} selected={item.id === projectId} working={working} onSelect={() => setProjectId(item.id)} onStatus={() => changeProjectStatus(item)} onDelete={() => removeProject(item)} />)}{!loading && visibleProjects.length === 0 ? <p className="text-xs leading-5 text-noline-muted">Aucun projet {projectView === "archived" ? "archivé" : "actif"}.</p> : null}</div>
         {projectView === "active" ? <form onSubmit={addProject} className="mt-4 space-y-2 border-t border-white/10 pt-4"><input className="field" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nom du projet" aria-label="Nom du projet Forge" /><input className="field" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Description (optionnelle)" aria-label="Description du projet Forge" /><button disabled={authBlocked || working || !name.trim()} className="flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 text-xs font-black text-white disabled:opacity-40"><Plus className="h-4 w-4" />Créer</button></form> : null}
-        <div className="mt-6 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><h2 className="text-sm font-black text-white">Sessions</h2><button type="button" onClick={addConversation} disabled={authBlocked || project?.status === "archived" || !projectId || working} aria-label="Créer une session Forge" className="rounded-md p-2 text-noline-orange disabled:opacity-30"><Plus className="h-4 w-4" /></button></div><div className="mt-2 space-y-2">{conversations.map((item) => <button key={item.id} type="button" onClick={() => setConversationId(item.id)} className={`w-full truncate rounded-md px-3 py-2 text-left text-xs font-bold ${item.id === conversationId ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}>{item.title}</button>)}</div></div>
+        <div className="mt-6 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><h2 className="text-sm font-black text-white">Sessions</h2><button type="button" onClick={addConversation} disabled={authBlocked || project?.status === "archived" || !projectId || working} aria-label="Créer une session Forge" className="rounded-md p-2 text-noline-orange disabled:opacity-30"><Plus className="h-4 w-4" /></button></div><div className="mt-2 space-y-2">{conversations.map((item) => editingConversationId === item.id ? <form key={item.id} onSubmit={(event) => { event.preventDefault(); void saveConversationTitle(item); }} className="flex gap-1"><input autoFocus maxLength={60} value={editingConversationTitle} onChange={(event) => setEditingConversationTitle(event.target.value)} className="field min-w-0 flex-1 px-2 py-1 text-xs" aria-label={`Renommer ${item.title}`} /><button disabled={!editingConversationTitle.trim() || working} aria-label="Enregistrer le titre" className="rounded p-2 text-green-300 disabled:opacity-40"><Check className="h-3.5 w-3.5" /></button><button type="button" onClick={() => setEditingConversationId("")} aria-label="Annuler le renommage" className="rounded p-2 text-noline-muted"><X className="h-3.5 w-3.5" /></button></form> : <div key={item.id} className={`flex items-center rounded-md ${item.id === conversationId ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}><button type="button" onClick={() => selectConversation(item.id)} className="min-w-0 flex-1 truncate px-3 py-2 text-left text-xs font-bold">{item.title}</button><button type="button" onClick={() => { setEditingConversationId(item.id); setEditingConversationTitle(item.title); }} aria-label={`Renommer ${item.title}`} className="rounded p-2 opacity-70"><Pencil className="h-3.5 w-3.5" /></button></div>)}</div></div>
       </aside>
       <main className="surface premium-border flex min-h-[38rem] min-w-0 flex-col overflow-hidden rounded-xl shadow-premium">
         <header className="border-b border-white/10 px-5 py-4"><p className="text-xs text-noline-muted">{project?.name || "Aucun projet"}</p><h2 className="mt-1 truncate font-black text-white">{conversation?.title || "Sélectionnez une session"}</h2></header>
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.map((message) => <ForgeBubble key={message.id} message={message} />)}{!conversationId ? <EmptyChat /> : null}{conversationId && !loading && messages.length === 0 ? <EmptyChat ready /> : null}</div>
+        <div ref={messagesViewport} onScroll={(event) => { const node = event.currentTarget; followMessages.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100; }} className="flex-1 space-y-4 overflow-y-auto p-5">{messages.map((message) => <ForgeBubble key={message.id} message={message} />)}{!conversationId ? <EmptyChat /> : null}{conversationId && !loading && messages.length === 0 ? <EmptyChat ready /> : null}</div>
         <div className="border-t border-white/10 p-4"><div className="mb-2 flex gap-1" role="group" aria-label="Mode Forge"><button type="button" onClick={() => setComposerMode("chat")} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${composerMode === "chat" ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}>Conversation</button><button type="button" onClick={() => setComposerMode("agent")} disabled={!agentAvailable} className={`rounded px-2 py-1 text-[10px] font-black uppercase disabled:opacity-40 ${composerMode === "agent" ? "bg-noline-orange text-noline-black" : "bg-white/5 text-noline-muted"}`}>Exécuter avec Forge</button>{composerMode === "agent" ? <span className="ml-auto self-center text-[10px] font-black text-noline-muted">{agentActive ? "AGENT EN COURS" : "RUNTIME READY"}</span> : null}</div><form onSubmit={send} className="flex items-end gap-3"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={authBlocked || project?.status === "archived" || !conversationId || working || agentActive} rows={3} className="field flex-1 resize-none font-mono" placeholder={composerMode === "agent" ? "Décrivez la mission à exécuter dans le sandbox…" : "Décrivez le problème, collez du code ou demandez un plan…"} aria-label={composerMode === "agent" ? "Mission pour l’Agent Forge" : "Message pour Forge"} /><button disabled={authBlocked || project?.status === "archived" || !conversationId || !draft.trim() || working || agentActive || (composerMode === "agent" && !agentAvailable)} className="flex h-12 w-12 items-center justify-center rounded-md bg-noline-orange text-noline-black disabled:opacity-40" aria-label={composerMode === "agent" ? "Exécuter avec Forge" : "Envoyer à Forge"}>{working || agentActive ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></form>{notice ? <p role="status" className="mt-2 text-xs text-noline-muted">{notice}</p> : null}</div>
       </main>
-      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers actifs" value={`${(contextByConversation[conversationId] || []).length} fichier(s)`} /><ContextRow icon={TerminalSquare} label="Accès" value="GitHub lecture seule" /></div><ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} /><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></aside>
+      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers actifs" value={`${(contextByConversation[conversationId] || []).length} fichier(s)`} /><ContextRow icon={TerminalSquare} label="Accès" value="GitHub lecture seule" /></div><ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} onConversationUpdated={(updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))} /><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></aside>
     </div>
   </div>;
 }

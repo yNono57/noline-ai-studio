@@ -20,7 +20,7 @@ export const openAIForgeProvider: ForgeModelProvider = {
     if (!apiKey) throw new ForgeGenerationError("Forge n’est pas configuré.");
     const messages: ChatCompletionMessageParam[] = input.messages.map((message) => ({ role: message.role, content: message.content })) as ChatCompletionMessageParam[];
     try {
-      const completion = await new OpenAI({ apiKey }).chat.completions.create({ model: input.model, messages });
+      const completion = await new OpenAI({ apiKey }).chat.completions.create({ model: input.model, messages, ...(input.jsonMode ? { response_format: { type: "json_object" as const } } : {}) });
       const content = completion.choices[0]?.message.content?.trim();
       if (!content) throw new ForgeGenerationError("Forge a retourné une réponse vide.");
       return { message: { role: "assistant", content }, model: input.model, finishReason: completion.choices[0]?.finish_reason || undefined };

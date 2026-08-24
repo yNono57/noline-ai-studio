@@ -34,6 +34,9 @@ export async function createForgeConversation(projectId: string) {
   })).conversation;
 }
 
+export async function renameForgeConversation(conversationId: string, title: string) {
+  return (await request<{ conversation: ForgeConversation }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}`, { method: "PATCH", body: JSON.stringify({ title }) })).conversation;
+}
 export async function setForgeConversationStatus(conversationId: string, status: "active" | "archived") {
   return (await request<{ conversation: ForgeConversation }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}`, { method: "PATCH", body: JSON.stringify({ status }) })).conversation;
 }
@@ -44,7 +47,7 @@ export async function listForgeMessages(conversationId: string) {
 }
 
 export function sendForgeMessage(conversationId: string, content: string, userMessageId?: string | null, contextPaths: string[] = []) {
-  return request<{ user_message: ForgeMessage; assistant_message: ForgeMessage }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/messages`, {
+  return request<{ user_message: ForgeMessage; assistant_message: ForgeMessage; conversation: ForgeConversation }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST", body: JSON.stringify({ content, context_paths: contextPaths, ...(userMessageId ? { user_message_id: userMessageId } : {}) })
   });
 }
@@ -97,7 +100,7 @@ export function getForgeRuntimeGitDiff(conversationId: string, limit?: number) {
 
 export type ForgeAgentRunPayload = { run: ForgeAgentRunView; steps: ForgeAgentStep[] };
 export function getLatestForgeAgentRun(conversationId: string) { return request<{ agentRun: ForgeAgentRunPayload | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`); }
-export function startForgeAgentRun(conversationId: string, objective: string) { return request<{ agentRun: ForgeAgentRunPayload }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective }) }); }
+export function startForgeAgentRun(conversationId: string, objective: string) { return request<{ agentRun: ForgeAgentRunPayload; conversation: ForgeConversation }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective }) }); }
 export function cancelForgeAgentRun(conversationId: string, runId: string) { return request<{ run: ForgeAgentRunView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs/${encodeURIComponent(runId)}`, { method: "DELETE" }); }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let auth = await getAuthenticatedHeaders();

@@ -10,7 +10,7 @@ import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
 import { ForgeAgentRunnerPanel } from "./ForgeAgentRunnerPanel";
 
 type AgentLaunchRequest = { id: string; objective: string };
-export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void }) {
+export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange, onConversationUpdated }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void; onConversationUpdated?: (conversation: import("@/lib/forge/forge-store").ForgeConversation) => void }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
   const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -89,7 +89,7 @@ export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequ
       </div>
       <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
       {runtime?.status === "READY" ? <ForgeRuntimeDiagnostics key={runtime.runtimeId} conversationId={conversationId} /> : null}
-      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} launchRequest={agentLaunchRequest} onLaunchRequestHandled={onAgentLaunchRequestHandled} onActiveChange={onAgentActiveChange} /> : null}
+      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} launchRequest={agentLaunchRequest} onLaunchRequestHandled={onAgentLaunchRequestHandled} onActiveChange={onAgentActiveChange} onConversationUpdated={onConversationUpdated} /> : null}
     </div>
   </details>;
 }
