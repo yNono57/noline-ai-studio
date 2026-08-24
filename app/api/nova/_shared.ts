@@ -6,6 +6,7 @@ import {
   type CreateProjectInput
 } from "@/lib/chat/conversation-store";
 import { getUserFromRequest } from "@/lib/supabase-server";
+import { withNovaModel } from "@/lib/chat/nova-model";
 
 class NovaApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -41,12 +42,11 @@ export async function parseConversationInput(
     throw invalid("mode doit être CHAT ou CODE.");
   }
 
-  return {
+  return withNovaModel({
     title: requiredString(body.title, "title"),
     mode: mode as ConversationMode,
-    agent: requiredString(body.agent, "agent"),
-    modelKey: requiredString(body.model_key, "model_key")
-  };
+    agent: requiredString(body.agent, "agent")
+  });
 }
 
 export async function parseNovaMessageInput(request: Request) {

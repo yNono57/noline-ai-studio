@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Archive, Check, Copy, FolderPlus, Loader2, MessageSquarePlus, MoreHorizontal, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import type { Conversation, ConversationStatus, Message, Project } from "@/lib/chat/conversation-store";
+import { DEFAULT_NOVA_MODEL } from "@/lib/chat/nova-model";
 import {
   createConversation, createProject, deleteConversation, deleteProject, listConversations, listMessages,
   listProjects, NovaClientError, sendMessage, setConversationStatus, setProjectStatus
 } from "@/lib/chat/nova-client";
 
-const INITIAL_MODEL_KEY = "gpt-4.1-mini";
+const INITIAL_MODEL_KEY = DEFAULT_NOVA_MODEL;
 
 export function NovaWorkspace() {
   const [projects, setProjects] = useState<Project[]>([]);

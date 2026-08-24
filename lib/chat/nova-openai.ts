@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { Message } from "./conversation-store";
+import { getNovaModel } from "./nova-model";
 import { buildNovaMessages } from "./nova-safety";
 
 export class NovaGenerationError extends Error {
@@ -9,7 +10,7 @@ export class NovaGenerationError extends Error {
 
 export async function generateNovaReply(history: Message[]) {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_MODEL;
+  const model = getNovaModel();
   if (!apiKey || !model) throw new NovaGenerationError("Nova n’est pas configurée.");
   const messages: ChatCompletionMessageParam[] = buildNovaMessages(history);
   debugNovaRequest(model, messages);

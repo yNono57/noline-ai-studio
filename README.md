@@ -57,6 +57,7 @@ Remplir au minimum:
 
 ```env
 OPENAI_API_KEY=sk-your-openai-api-key
+NOVA_MODEL=gpt-5.4-mini
 OPENAI_MODEL=gpt-4.1-mini
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
@@ -89,6 +90,7 @@ Toutes les variables sont listees dans `.env.example` et `.env.local.example`.
 
 ```env
 OPENAI_API_KEY=sk-your-openai-api-key
+NOVA_MODEL=gpt-5.4-mini
 OPENAI_MODEL=gpt-4.1-mini
 
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
