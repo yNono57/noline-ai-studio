@@ -7,6 +7,7 @@ import type { ForgeWorkspaceView } from "@/lib/forge/workspace-foundation";
 import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
 import { createForgeRuntime, destroyForgeRuntime, getForgeRuntime, getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
 import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
+import { ForgeAgentRunnerPanel } from "./ForgeAgentRunnerPanel";
 
 export function ForgeWorkspaceControl({ project, conversationId }: { project: ForgeProject | undefined; conversationId: string }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
@@ -85,6 +86,7 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
       </div>
       <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
       {runtime?.status === "READY" ? <ForgeRuntimeDiagnostics key={runtime.runtimeId} conversationId={conversationId} /> : null}
+      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} /> : null}
     </div>
   </details>;
 }
