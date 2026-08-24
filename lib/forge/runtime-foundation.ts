@@ -38,6 +38,7 @@ export interface ForgeRuntimeProvider {
   destroyRuntime(runtime: ForgeRuntime): Promise<void>;
   readFile(runtime: ForgeRuntime, path: string): Promise<ForgeRuntimeFile>;
   writeFile(runtime: ForgeRuntime, path: string, content: string): Promise<ForgeRuntimeFile>;
+  deleteFile(runtime: ForgeRuntime, path: string): Promise<void>;
   listFiles(runtime: ForgeRuntime, path: string): Promise<ForgeRuntimeFileEntry[]>;
   executeCommand(runtime: ForgeRuntime, command: ForgeRuntimeCommand): Promise<ForgeRuntimeCommandResult>;
   getGitStatus(runtime: ForgeRuntime): Promise<ForgeRuntimeGitStatus>;
@@ -199,6 +200,9 @@ export function createForgeRuntimeService(deps: ForgeRuntimeServiceDependencies)
     if (typeof content !== "string" || content.length > FORGE_RUNTIME_LIMITS.maxFileCharacters) throw new ForgeRuntimeError("INVALID_INPUT", "Contenu runtime trop volumineux.");
     const runtime = await ready(userId, conversationId); const result = await deps.provider.writeFile(runtime, normalizeRuntimePath(path), content); await touch(userId, runtime); return result;
   }
+  async function deleteFile(userId: string, conversationId: string, path: string) {
+    const runtime = await ready(userId, conversationId); await deps.provider.deleteFile(runtime, normalizeRuntimePath(path)); await touch(userId, runtime);
+  }
   async function listFiles(userId: string, conversationId: string, path = ".") {
     const runtime = await ready(userId, conversationId); const result = await deps.provider.listFiles(runtime, normalizeRuntimePath(path, true)); await touch(userId, runtime); return result.slice(0, FORGE_RUNTIME_LIMITS.maxListEntries);
   }
@@ -212,5 +216,5 @@ export function createForgeRuntimeService(deps: ForgeRuntimeServiceDependencies)
     const runtime = await ready(userId, conversationId); const result = await deps.provider.getGitDiff(runtime, normalizeRuntimeDiffLimit(maxPatchCharacters)); await touch(userId, runtime); return result;
   }
 
-  return { create, get, destroy, readFile, writeFile, listFiles, executeCommand, getGitStatus, getGitDiff };
+  return { create, get, destroy, readFile, writeFile, deleteFile, listFiles, executeCommand, getGitStatus, getGitDiff };
 }

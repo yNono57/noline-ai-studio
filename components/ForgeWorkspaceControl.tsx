@@ -6,6 +6,7 @@ import type { ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeWorkspaceView } from "@/lib/forge/workspace-foundation";
 import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
 import { createForgeRuntime, destroyForgeRuntime, getForgeRuntime, getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
+import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
 
 export function ForgeWorkspaceControl({ project, conversationId }: { project: ForgeProject | undefined; conversationId: string }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
@@ -83,6 +84,7 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
         {runtime ? <button type="button" onClick={destroyRuntime} disabled={runtimeLoading || runtime.status === "DESTROYED" || runtime.status === "DESTROYING" || runtime.status === "CREATING"} aria-label="Détruire le runtime" className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2 font-black text-white disabled:opacity-40"><Trash2 className="h-4 w-4" />Détruire</button> : null}
       </div>
       <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
+      {runtime?.status === "READY" ? <ForgeRuntimeDiagnostics key={runtime.runtimeId} conversationId={conversationId} /> : null}
     </div>
   </details>;
 }

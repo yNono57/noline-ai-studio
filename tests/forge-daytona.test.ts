@@ -69,3 +69,18 @@ daytonaTest("aucun secret provider n'est journalise ou retourne", () => {
   const shared = daytonaFs.readFileSync(daytonaPath.join(runtimeRoot, "_shared.ts"), "utf8");
   daytonaAssert.doesNotMatch(shared, /stack|cause|process\.env/);
 });
+daytonaTest("suppression runtime reste confinée au sandbox et authentifiée", () => {
+  daytonaAssert.match(provider, /sandbox\.fs\.deleteFile\(sandboxPath\(path\), false\)/);
+  const route = daytonaFs.readFileSync(daytonaPath.join(runtimeRoot, "file/route.ts"), "utf8");
+  daytonaAssert.match(route, /export async function DELETE/);
+  daytonaAssert.match(route, /authenticateForge\(request\)/);
+  daytonaAssert.match(route, /forgeRuntimeService\.deleteFile\(user\.id, conversationId, path\)/);
+});
+
+daytonaTest("interface diagnostic utilise seulement les API runtime bornées", () => {
+  const ui = daytonaFs.readFileSync("components/ForgeRuntimeDiagnostics.tsx", "utf8");
+  for (const label of ["Tester la lecture", "Créer fichier test", "Tester commande", "Vérifier Git", "Nettoyer le test"]) daytonaAssert.match(ui, new RegExp(label));
+  daytonaAssert.match(ui, /command: "node"/);
+  daytonaAssert.match(ui, /timeoutMs: 10_000/);
+  daytonaAssert.doesNotMatch(ui, /DAYTONA_API_KEY|GITHUB_APP_PRIVATE_KEY|installation token|git commit|git push/i);
+});

@@ -77,6 +77,9 @@ export function readForgeRuntimeFile(conversationId: string, path: string) {
 export function writeForgeRuntimeFile(conversationId: string, path: string, content: string) {
   return request<{ file: ForgeRuntimeFile }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/file`, { method: "PUT", body: JSON.stringify({ path, content }) });
 }
+export function deleteForgeRuntimeFile(conversationId: string, path: string) {
+  return request<void>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+}
 export function listForgeRuntimeFiles(conversationId: string, path = ".") {
   return request<{ files: ForgeRuntimeFileEntry[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/files?path=${encodeURIComponent(path)}`);
 }

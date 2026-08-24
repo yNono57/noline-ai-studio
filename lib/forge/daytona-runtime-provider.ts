@@ -94,6 +94,14 @@ export const daytonaRuntimeProvider: ForgeRuntimeProvider = {
     try { await sandbox.fs.uploadFile(buffer, target); } catch { throw new ForgeRuntimeError("UNAVAILABLE", "L'ecriture du fichier runtime a echoue."); }
     return { path, size: buffer.length, content };
   },
+  async deleteFile(runtime, path) {
+    const sandbox = await sandboxFor(runtime);
+    try { await sandbox.fs.deleteFile(sandboxPath(path), false); }
+    catch (error) {
+      if (error instanceof DaytonaNotFoundError) return;
+      throw new ForgeRuntimeError("UNAVAILABLE", "La suppression du fichier runtime a echoue.");
+    }
+  },
   async listFiles(runtime, path) {
     const sandbox = await sandboxFor(runtime);
     try {

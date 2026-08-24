@@ -16,11 +16,12 @@ function runtimeHarness() {
   let workspace = { workspaceId: "workspace-a", userId: "user-a", status: "READY", repository: "owner/repo", branch: "main", baseCommitSha: "a".repeat(40) };
   const runtimes: Array<Record<string, unknown>> = [];
   let capturedSource: Record<string, unknown> | null = null;
+  let deletedPath: string | null = null;
   const provider = {
     name: "test-provider", provisioningAvailable: false,
     async createRuntime(_runtime: unknown, source: Record<string, unknown>) { capturedSource = source; return { providerRuntimeId: "provider-runtime", status: "READY", readyAt: "2026-08-24T00:00:01.000Z", expiresAt: null }; },
     async getRuntime() { return null; }, async destroyRuntime() {},
-    async readFile() { throw new Error("not implemented"); }, async writeFile() { throw new Error("not implemented"); }, async listFiles() { throw new Error("not implemented"); },
+    async readFile() { throw new Error("not implemented"); }, async writeFile() { throw new Error("not implemented"); }, async deleteFile(_runtime: unknown, path: string) { deletedPath = path; }, async listFiles() { throw new Error("not implemented"); },
     async executeCommand() { throw new Error("not implemented"); }, async getGitStatus() { throw new Error("not implemented"); }, async getGitDiff() { throw new Error("not implemented"); },
   };
   const deps = {
@@ -31,7 +32,7 @@ function runtimeHarness() {
     provider,
     now: () => "2026-08-24T00:00:02.000Z",
   };
-  return { service: createForgeRuntimeService(deps), provider, runtimes, capturedSource: () => capturedSource, setWorkspace(next: typeof workspace) { workspace = next; } };
+  return { service: createForgeRuntimeService(deps), provider, runtimes, capturedSource: () => capturedSource, deletedPath: () => deletedPath, setWorkspace(next: typeof workspace) { workspace = next; } };
 }
 
 function readyRuntime(status = "READY") {
@@ -84,6 +85,12 @@ runtimeTest("normalisation chemins refuse traversal, absolu, Windows et null byt
   runtimeAssert.equal(normalizeRuntimePath("src/app.ts"), "src/app.ts"); runtimeAssert.throws(() => normalizeRuntimePath("../secret")); runtimeAssert.throws(() => normalizeRuntimePath("/etc/passwd")); runtimeAssert.throws(() => normalizeRuntimePath("C:/Windows")); runtimeAssert.throws(() => normalizeRuntimePath("src\\secret")); runtimeAssert.throws(() => normalizeRuntimePath("bad\0path"));
 });
 
+runtimeTest("suppression fichier réutilise ownership, runtime READY et normalisation de chemin", async () => {
+  const target = runtimeHarness(); target.provider.provisioningAvailable = true; await target.service.create("user-a", "conversation-a");
+  await target.service.deleteFile("user-a", "conversation-a", ".forge-runtime-test.txt"); runtimeAssert.equal(target.deletedPath(), ".forge-runtime-test.txt");
+  await runtimeAssert.rejects(() => target.service.deleteFile("user-b", "conversation-a", ".forge-runtime-test.txt"), (error: unknown) => (error as { code?: string }).code === "NOT_FOUND");
+  await runtimeAssert.rejects(() => target.service.deleteFile("user-a", "conversation-a", "../secret"), (error: unknown) => (error as { code?: string }).code === "INVALID_INPUT");
+});
 runtimeTest("contrat commande borne cwd, timeout et sortie", () => {
   const command = normalizeRuntimeCommand({ command: "npm", args: ["test"], cwd: "app", timeoutMs: 60_000, maxOutputBytes: 1_000_000 }); runtimeAssert.equal(command.cwd, "app");
   runtimeAssert.throws(() => normalizeRuntimeCommand({ command: "npm test", args: [], cwd: ".", timeoutMs: 30_000, maxOutputBytes: 10_000 })); runtimeAssert.throws(() => normalizeRuntimeCommand({ command: "npm", args: [], cwd: "../", timeoutMs: 30_000, maxOutputBytes: 10_000 }));
@@ -95,7 +102,7 @@ runtimeTest("expiration READY devient EXPIRED sans appeler le provider", async (
 });
 
 runtimeTest("abstraction provider expose lifecycle, filesystem, commandes et git", () => {
-  const provider = runtimeHarness().provider as Record<string, unknown>; for (const method of ["createRuntime", "getRuntime", "destroyRuntime", "readFile", "writeFile", "listFiles", "executeCommand", "getGitStatus", "getGitDiff"]) runtimeAssert.equal(typeof provider[method], "function");
+  const provider = runtimeHarness().provider as Record<string, unknown>; for (const method of ["createRuntime", "getRuntime", "destroyRuntime", "readFile", "writeFile", "deleteFile", "listFiles", "executeCommand", "getGitStatus", "getGitDiff"]) runtimeAssert.equal(typeof provider[method], "function");
 });
 
 runtimeTest("le patch git reste strictement borné", () => {

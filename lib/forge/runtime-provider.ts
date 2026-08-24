@@ -12,6 +12,7 @@ export const unprovisionedRuntimeProvider: ForgeRuntimeProvider = {
   async destroyRuntime() { unavailable(); },
   async readFile() { return unavailable(); },
   async writeFile() { return unavailable(); },
+  async deleteFile() { unavailable(); },
   async listFiles() { return unavailable(); },
   async executeCommand() { return unavailable(); },
   async getGitStatus() { return unavailable(); },
