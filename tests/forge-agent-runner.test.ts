@@ -4,9 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const { createForgeAgentRunner, normalizeAgentCommand, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
+const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 
 function harness(decisions: Array<Record<string, unknown>>, cancelled: boolean | (() => boolean) = false) {
-  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; let commandIndex = 0;
+  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
@@ -14,12 +15,23 @@ function harness(decisions: Array<Record<string, unknown>>, cancelled: boolean |
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles() { return [{ path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { return { path, size: 20, content: "repository-secret-source" }; }, async writeFile(path: string) { writes.push(path); return { path, size: 10, content: "changed" }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/index.ts"], deleted: [], patch: "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles() { return [{ path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); return { path, size: 20, content: '{"name":"noline-forge-testbed"}' }; }, async writeFile(path: string) { writes.push(path); return { path, size: 10, content: "changed" }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/index.ts"], deleted: [], patch: "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(_context: unknown) { const next = decisions.shift(); if (!next) throw new Error("missing decision"); return next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes };
+  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads };
 }
 
+test("composeur Agent inspecte package.json via le runtime au lieu du chat sans outils", async () => {
+  const target = harness([{ type: "PLAN", summary: "Inspecter", plan: ["Lire package.json"] }, { type: "TOOL_CALL", summary: "Lire package.json", tool: "read_file", input: { path: "package.json" } }, { type: "FINAL", summary: "Projet identifié", report: "Le projet est noline-forge-testbed." }]);
+  const result = await submitForgeComposer("agent", "Inspecte package.json et indique le nom du projet.", { chat: async () => { throw new Error("chat classique appelé"); }, agent: (objective: string) => target.runner.run("user-a", "conversation-a", objective) });
+  assert.equal(result.status, "COMPLETED"); assert.deepEqual(target.reads, ["package.json"]); assert.equal(target.run()?.objective, "Inspecte package.json et indique le nom du projet."); assert.doesNotMatch(String(target.run()?.finalReport), /pas accès|fournir.*package\.json/i);
+});
+
+test("composeur Agent écrit dans Daytona puis contrôle git status sans commit ni push", async () => {
+  const target = harness([{ type: "PLAN", summary: "Créer", plan: ["Écrire le fichier", "Vérifier Git"] }, { type: "TOOL_CALL", summary: "Créer hello", tool: "write_file", input: { path: "hello-forge.txt", content: "hello" } }, { type: "TOOL_CALL", summary: "Vérifier Git", tool: "git_status", input: {} }, { type: "FINAL", summary: "Terminé", report: "hello-forge.txt créé dans le sandbox." }]);
+  const result = await submitForgeComposer("agent", "Crée hello-forge.txt contenant hello", { chat: async () => { throw new Error("chat classique appelé"); }, agent: (objective: string) => target.runner.run("user-a", "conversation-a", objective) });
+  assert.equal(result.status, "COMPLETED"); assert.deepEqual(target.writes, ["hello-forge.txt"]); assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED"); assert.doesNotMatch(JSON.stringify(target.steps), /git_commit|git_push/);
+});
 test("boucle agentique planifie, corrige une validation en échec puis termine", async () => {
   const target = harness([
     { type: "PLAN", summary: "Plan", plan: ["Inspecter", "Modifier", "Tester"] },

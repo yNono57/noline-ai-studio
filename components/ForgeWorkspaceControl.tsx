@@ -9,7 +9,8 @@ import { createForgeRuntime, destroyForgeRuntime, getForgeRuntime, getForgeWorks
 import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
 import { ForgeAgentRunnerPanel } from "./ForgeAgentRunnerPanel";
 
-export function ForgeWorkspaceControl({ project, conversationId }: { project: ForgeProject | undefined; conversationId: string }) {
+type AgentLaunchRequest = { id: string; objective: string };
+export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
   const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,6 +36,8 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
     getForgeRuntime(conversationId).then(({ runtime }) => { if (active) setRuntime(runtime); }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Runtime indisponible."); });
     return () => { active = false; };
   }, [conversationId, workspace?.status, workspace?.workspaceId]);
+
+  useEffect(() => { onRuntimeReadyChange?.(runtime?.status === "READY"); }, [onRuntimeReadyChange, runtime?.status]);
 
   async function prepare() {
     if (!conversationId || loading) return;
@@ -86,7 +89,7 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
       </div>
       <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
       {runtime?.status === "READY" ? <ForgeRuntimeDiagnostics key={runtime.runtimeId} conversationId={conversationId} /> : null}
-      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} /> : null}
+      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} launchRequest={agentLaunchRequest} onLaunchRequestHandled={onAgentLaunchRequestHandled} onActiveChange={onAgentActiveChange} /> : null}
     </div>
   </details>;
 }

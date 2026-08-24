@@ -6,6 +6,7 @@ import type { ForgeConversation, ForgeMessage, ForgeProject } from "@/lib/forge/
 import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
 import { ForgeGitHubPanel } from "@/components/ForgeGitHubPanel";
 import { ForgeWorkspaceControl } from "@/components/ForgeWorkspaceControl";
+import { submitForgeComposer, type ForgeComposerMode } from "@/lib/forge/forge-submit";
 import {
   createForgeConversation,
   createForgeProject,
@@ -36,6 +37,10 @@ export function ForgeWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [contextByConversation, setContextByConversation] = useState<Record<string, ForgeGitHubFile[]>>({});
+  const [composerMode, setComposerMode] = useState<ForgeComposerMode>("chat");
+  const [agentLaunchRequest, setAgentLaunchRequest] = useState<{ id: string; objective: string } | null>(null);
+  const [agentAvailable, setAgentAvailable] = useState(false);
+  const [agentActive, setAgentActive] = useState(false);
 
   const handleError = useCallback((caught: unknown) => {
     if (caught instanceof ForgeClientError && caught.status === 401) {
@@ -78,6 +83,7 @@ export function ForgeWorkspace() {
     let active = true;
     setMessages([]);
     setRetryMessageId(null);
+    setComposerMode("chat"); setAgentLaunchRequest(null); setAgentAvailable(false); setAgentActive(false);
     if (!conversationId || authBlocked) return () => { active = false; };
     setLoading(true);
     listForgeMessages(conversationId)
@@ -132,7 +138,13 @@ export function ForgeWorkspace() {
 
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!conversationId || !draft.trim() || working) return;
+    if (!conversationId || !draft.trim() || working || agentActive) return;
+    if (composerMode === "agent") {
+      if (!agentAvailable) { setError("Un runtime Daytona READY est requis pour exécuter cette mission."); return; }
+      const objective = draft.trim(); setError(""); setNotice("Mission transmise à l’Agent Forge…");
+      submitForgeComposer(composerMode, objective, { chat: () => undefined, agent: (value) => setAgentLaunchRequest({ id: crypto.randomUUID(), objective: value }) });
+      setDraft(""); return;
+    }
     setWorking(true); setError(""); setNotice("Forge analyse votre demande…");
     try {
       const result = await sendForgeMessage(conversationId, draft.trim(), retryMessageId, (contextByConversation[conversationId] || []).map((file) => file.path));
@@ -168,9 +180,9 @@ export function ForgeWorkspace() {
       <main className="surface premium-border flex min-h-[38rem] min-w-0 flex-col overflow-hidden rounded-xl shadow-premium">
         <header className="border-b border-white/10 px-5 py-4"><p className="text-xs text-noline-muted">{project?.name || "Aucun projet"}</p><h2 className="mt-1 truncate font-black text-white">{conversation?.title || "Sélectionnez une session"}</h2></header>
         <div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.map((message) => <ForgeBubble key={message.id} message={message} />)}{!conversationId ? <EmptyChat /> : null}{conversationId && !loading && messages.length === 0 ? <EmptyChat ready /> : null}</div>
-        <div className="border-t border-white/10 p-4"><form onSubmit={send} className="flex items-end gap-3"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={authBlocked || project?.status === "archived" || !conversationId || working} rows={3} className="field flex-1 resize-none font-mono" placeholder="Décrivez le problème, collez du code ou demandez un plan…" aria-label="Message pour Forge" /><button disabled={authBlocked || project?.status === "archived" || !conversationId || !draft.trim() || working} className="flex h-12 w-12 items-center justify-center rounded-md bg-noline-orange text-noline-black disabled:opacity-40" aria-label="Envoyer à Forge">{working ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></form>{notice ? <p role="status" className="mt-2 text-xs text-noline-muted">{notice}</p> : null}</div>
+        <div className="border-t border-white/10 p-4"><div className="mb-2 flex gap-1" role="group" aria-label="Mode Forge"><button type="button" onClick={() => setComposerMode("chat")} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${composerMode === "chat" ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}>Conversation</button><button type="button" onClick={() => setComposerMode("agent")} disabled={!agentAvailable} className={`rounded px-2 py-1 text-[10px] font-black uppercase disabled:opacity-40 ${composerMode === "agent" ? "bg-noline-orange text-noline-black" : "bg-white/5 text-noline-muted"}`}>Exécuter avec Forge</button>{composerMode === "agent" ? <span className="ml-auto self-center text-[10px] font-black text-noline-muted">{agentActive ? "AGENT EN COURS" : "RUNTIME READY"}</span> : null}</div><form onSubmit={send} className="flex items-end gap-3"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={authBlocked || project?.status === "archived" || !conversationId || working || agentActive} rows={3} className="field flex-1 resize-none font-mono" placeholder={composerMode === "agent" ? "Décrivez la mission à exécuter dans le sandbox…" : "Décrivez le problème, collez du code ou demandez un plan…"} aria-label={composerMode === "agent" ? "Mission pour l’Agent Forge" : "Message pour Forge"} /><button disabled={authBlocked || project?.status === "archived" || !conversationId || !draft.trim() || working || agentActive || (composerMode === "agent" && !agentAvailable)} className="flex h-12 w-12 items-center justify-center rounded-md bg-noline-orange text-noline-black disabled:opacity-40" aria-label={composerMode === "agent" ? "Exécuter avec Forge" : "Envoyer à Forge"}>{working || agentActive ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></form>{notice ? <p role="status" className="mt-2 text-xs text-noline-muted">{notice}</p> : null}</div>
       </main>
-      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers actifs" value={`${(contextByConversation[conversationId] || []).length} fichier(s)`} /><ContextRow icon={TerminalSquare} label="Accès" value="GitHub lecture seule" /></div><ForgeWorkspaceControl project={project} conversationId={conversationId} /><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></aside>
+      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers actifs" value={`${(contextByConversation[conversationId] || []).length} fichier(s)`} /><ContextRow icon={TerminalSquare} label="Accès" value="GitHub lecture seule" /></div><ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} /><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></aside>
     </div>
   </div>;
 }

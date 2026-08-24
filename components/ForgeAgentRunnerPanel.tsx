@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Play, Square } from "lucide-react";
 import { cancelForgeAgentRun, getForgeRuntimeGitDiff, getLatestForgeAgentRun, startForgeAgentRun, type ForgeAgentRunPayload } from "@/lib/forge/forge-client";
 
 const ACTIVE = new Set(["QUEUED", "PLANNING", "RUNNING", "VALIDATING"]);
-export function ForgeAgentRunnerPanel({ conversationId }: { conversationId: string }) {
+type LaunchRequest = { id: string; objective: string };
+export function ForgeAgentRunnerPanel({ conversationId, launchRequest, onLaunchRequestHandled, onActiveChange }: { conversationId: string; launchRequest?: LaunchRequest | null; onLaunchRequestHandled?: (id: string) => void; onActiveChange?: (active: boolean) => void }) {
   const [objective, setObjective] = useState(""); const [payload, setPayload] = useState<ForgeAgentRunPayload | null>(null); const [launching, setLaunching] = useState(false); const [error, setError] = useState(""); const [diff, setDiff] = useState("");
+  const handledRequest = useRef<string | null>(null);
   const active = launching || Boolean(payload && ACTIVE.has(payload.run.status));
+  useEffect(() => { onActiveChange?.(active); }, [active, onActiveChange]);
   useEffect(() => { let mounted = true; const refresh = () => getLatestForgeAgentRun(conversationId).then(({ agentRun }) => { if (mounted) setPayload(agentRun); }).catch(() => undefined); void refresh(); if (!active) return () => { mounted = false; }; const timer = window.setInterval(refresh, 1500); return () => { mounted = false; window.clearInterval(timer); }; }, [active, conversationId]);
   useEffect(() => { let mounted = true; if (payload?.run.status !== "COMPLETED") return () => { mounted = false; }; getForgeRuntimeGitDiff(conversationId).then(({ diff: result }) => { if (mounted) setDiff(result.patch || "Aucun changement."); }).catch(() => { if (mounted) setDiff("Diff indisponible."); }); return () => { mounted = false; }; }, [conversationId, payload?.run.runId, payload?.run.status]);
-  async function launch() { if (!objective.trim() || active) return; setLaunching(true); setError(""); setDiff(""); try { setPayload((await startForgeAgentRun(conversationId, objective.trim())).agentRun); } catch (caught) { setError(caught instanceof Error ? caught.message : "Run Forge indisponible."); } finally { setLaunching(false); } }
+  const launchObjective = useCallback(async (value: string) => { if (!value.trim() || active) return; setObjective(value); setLaunching(true); setError(""); setDiff(""); try { setPayload((await startForgeAgentRun(conversationId, value.trim())).agentRun); } catch (caught) { setError(caught instanceof Error ? caught.message : "Run Forge indisponible."); } finally { setLaunching(false); } }, [active, conversationId]);
+  useEffect(() => { if (!launchRequest || handledRequest.current === launchRequest.id || active) return; handledRequest.current = launchRequest.id; onLaunchRequestHandled?.(launchRequest.id); void launchObjective(launchRequest.objective); }, [active, launchObjective, launchRequest, onLaunchRequestHandled]);
+  async function launch() { await launchObjective(objective); }
   async function cancel() { if (!payload || !ACTIVE.has(payload.run.status)) return; try { await cancelForgeAgentRun(conversationId, payload.run.runId); setPayload((await getLatestForgeAgentRun(conversationId)).agentRun); } catch (caught) { setError(caught instanceof Error ? caught.message : "Annulation impossible."); } }
   return <details className="mt-3 rounded-md border border-noline-orange/30 bg-noline-orange/5 p-2">
     <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 font-black text-white">Agent Forge<span className="ml-auto text-[10px] text-noline-muted">{payload?.run.status || "PRÊT"}</span></summary>
