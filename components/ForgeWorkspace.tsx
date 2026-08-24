@@ -7,6 +7,7 @@ import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
 import { ForgeGitHubPanel } from "@/components/ForgeGitHubPanel";
 import { ForgeWorkspaceControl } from "@/components/ForgeWorkspaceControl";
 import { submitForgeComposer, type ForgeComposerMode } from "@/lib/forge/forge-submit";
+import { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore, type ForgeSessionRestore } from "@/lib/forge/session-restore";
 import {
   createForgeConversation,
   createForgeProject,
@@ -49,7 +50,11 @@ export function ForgeWorkspace() {
   const [agentPayload, setAgentPayload] = useState<ForgeAgentRunPayload | null>(null);
   const [pendingAgentMission, setPendingAgentMission] = useState<{ id: string; content: string; createdAt: string } | null>(null);
   const [showLatestButton, setShowLatestButton] = useState(false);
+  const [restoreScrollConversationId, setRestoreScrollConversationId] = useState("");
+  const [contentLoadedConversationId, setContentLoadedConversationId] = useState("");
   const messagesViewport = useRef<HTMLDivElement | null>(null);
+  const conversationSection = useRef<HTMLElement | null>(null);
+  const restoreCandidate = useRef<ForgeSessionRestore | null>(null);
   const followMessages = useRef(true);
   const syncedAgentRun = useRef("");
   const syncedAgentTerminal = useRef("");
@@ -70,7 +75,11 @@ export function ForgeWorkspace() {
         if (!active) return;
         setProjects(data.projects);
         setModel(data.model);
-        setProjectId(data.projects.find((item) => item.status === "active")?.id || "");
+        const stored = readForgeSessionRestore(window.localStorage);
+        const restored = resolveForgeSessionRestore(stored, data.projects);
+        restoreCandidate.current = restored.valid ? stored : null;
+        if (!restored.valid) clearForgeSessionRestore(window.localStorage);
+        setProjectId(restored.projectId);
       })
       .catch((error) => active && handleError(error))
       .finally(() => active && setLoading(false));
@@ -85,22 +94,22 @@ export function ForgeWorkspace() {
     if (!projectId || authBlocked) return () => { active = false; };
     setLoading(true);
     listForgeConversations(projectId)
-      .then((items) => { if (active) { setConversations(items); setConversationId(items[0]?.id || ""); } })
-      .catch((error) => active && handleError(error))
+      .then((items) => { if (!active) return; setConversations(items); const candidate = restoreCandidate.current; if (candidate?.projectId === projectId) { const restored = resolveForgeSessionRestore(candidate, projects, items); restoreCandidate.current = null; if (!restored.valid) { clearForgeSessionRestore(window.localStorage); setProjectId(""); return; } setConversationId(restored.conversationId); setRestoreScrollConversationId(restored.conversationId); return; } const first = items.find((item) => item.status === "active"); setConversationId(first?.id || ""); if (first) saveForgeSessionRestore(window.localStorage, { projectId, conversationId: first.id }); })
+      .catch((error) => { if (!active) return; if (restoreCandidate.current?.projectId === projectId) { restoreCandidate.current = null; clearForgeSessionRestore(window.localStorage); setProjectId(""); } handleError(error); })
       .finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [authBlocked, handleError, projectId]);
+  }, [authBlocked, handleError, projectId, projects]);
 
   useEffect(() => {
     let active = true;
-    setMessages([]); setAgentPayload(null); setPendingAgentMission(null);
+    setMessages([]); setAgentPayload(null); setPendingAgentMission(null); setContentLoadedConversationId("");
     setRetryMessageId(null);
     setComposerMode("chat"); setAgentLaunchRequest(null); setAgentAvailable(false); setAgentActive(false);
     followMessages.current = true; setShowLatestButton(false); syncedAgentRun.current = ""; syncedAgentTerminal.current = "";
     if (!conversationId || authBlocked) return () => { active = false; };
     setLoading(true);
     Promise.all([listForgeMessages(conversationId), getLatestForgeAgentRun(conversationId)])
-      .then(([items, agent]) => { if (active) { setMessages(items); setAgentPayload(agent.agentRun); } })
+      .then(([items, agent]) => { if (active) { setMessages(items); setAgentPayload(agent.agentRun); setContentLoadedConversationId(conversationId); } })
       .catch((error) => active && handleError(error))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -112,8 +121,11 @@ export function ForgeWorkspace() {
     return () => window.cancelAnimationFrame(frame);
   }, [agentPayload?.run.status, agentPayload?.steps.length, conversationId, messages.length, pendingAgentMission]);
 
+  useEffect(() => { if (!restoreScrollConversationId || restoreScrollConversationId !== conversationId || contentLoadedConversationId !== conversationId) return; let secondFrame = 0; const firstFrame = window.requestAnimationFrame(() => { secondFrame = window.requestAnimationFrame(() => { followMessages.current = true; setShowLatestButton(false); messagesViewport.current?.scrollTo({ top: messagesViewport.current.scrollHeight, behavior: "auto" }); conversationSection.current?.scrollIntoView({ block: "start", behavior: "auto" }); setRestoreScrollConversationId(""); }); }); return () => { window.cancelAnimationFrame(firstFrame); if (secondFrame) window.cancelAnimationFrame(secondFrame); }; }, [agentPayload?.steps.length, contentLoadedConversationId, conversationId, messages.length, restoreScrollConversationId]);
+
   const scrollToLatest = useCallback(() => { followMessages.current = true; setShowLatestButton(false); messagesViewport.current?.scrollTo({ top: messagesViewport.current.scrollHeight, behavior: "smooth" }); }, []);
-  const selectConversation = useCallback((id: string) => { followMessages.current = true; setShowLatestButton(false); setConversationId(id); }, []);
+  const selectConversation = useCallback((id: string) => { restoreCandidate.current = null; followMessages.current = true; setShowLatestButton(false); setConversationId(id); if (projectId) saveForgeSessionRestore(window.localStorage, { projectId, conversationId: id }); }, [projectId]);
+  const selectProject = useCallback((id: string) => { restoreCandidate.current = null; clearForgeSessionRestore(window.localStorage); setProjectId(id); }, []);
   const handleAgentPayload = useCallback((payload: ForgeAgentRunPayload | null) => {
     setAgentPayload(payload);
     if (!payload || !conversationId) return;
@@ -140,7 +152,7 @@ export function ForgeWorkspace() {
     try {
       const conversation = await createForgeConversation(projectId);
       setConversations((current) => [conversation, ...current]);
-      setConversationId(conversation.id);
+      setConversationId(conversation.id); saveForgeSessionRestore(window.localStorage, { projectId, conversationId: conversation.id });
     } catch (error) { handleError(error); } finally { setWorking(false); }
   }
 
@@ -217,11 +229,11 @@ export function ForgeWorkspace() {
     <div className="grid min-h-[68vh] gap-4 xl:grid-cols-[17rem_minmax(0,1fr)_17rem]">
       <aside className="surface premium-border rounded-xl p-4 shadow-premium">
         <div className="flex items-center justify-between"><h2 className="text-sm font-black text-white">Projets Forge</h2>{loading ? <Loader2 className="h-4 w-4 animate-spin text-noline-orange" /> : null}</div>
-        <div className="mt-2 flex gap-1"><ForgeFilter active={projectView === "active"} onClick={() => { setProjectView("active"); setProjectId(projects.find((item) => item.status === "active")?.id || ""); }}>Actifs</ForgeFilter><ForgeFilter active={projectView === "archived"} onClick={() => { setProjectView("archived"); setProjectId(projects.find((item) => item.status === "archived")?.id || ""); }}>Archivés</ForgeFilter></div><div className="mt-3 max-h-48 space-y-2 overflow-y-auto">{visibleProjects.map((item) => <ForgeProjectRow key={item.id} project={item} selected={item.id === projectId} working={working} onSelect={() => setProjectId(item.id)} onStatus={() => changeProjectStatus(item)} onDelete={() => removeProject(item)} />)}{!loading && visibleProjects.length === 0 ? <p className="text-xs leading-5 text-noline-muted">Aucun projet {projectView === "archived" ? "archivé" : "actif"}.</p> : null}</div>
+        <div className="mt-2 flex gap-1"><ForgeFilter active={projectView === "active"} onClick={() => { setProjectView("active"); setProjectId(projects.find((item) => item.status === "active")?.id || ""); }}>Actifs</ForgeFilter><ForgeFilter active={projectView === "archived"} onClick={() => { setProjectView("archived"); setProjectId(projects.find((item) => item.status === "archived")?.id || ""); }}>Archivés</ForgeFilter></div><div className="mt-3 max-h-48 space-y-2 overflow-y-auto">{visibleProjects.map((item) => <ForgeProjectRow key={item.id} project={item} selected={item.id === projectId} working={working} onSelect={() => selectProject(item.id)} onStatus={() => changeProjectStatus(item)} onDelete={() => removeProject(item)} />)}{!loading && visibleProjects.length === 0 ? <p className="text-xs leading-5 text-noline-muted">Aucun projet {projectView === "archived" ? "archivé" : "actif"}.</p> : null}</div>
         {projectView === "active" ? <form onSubmit={addProject} className="mt-4 space-y-2 border-t border-white/10 pt-4"><input className="field" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nom du projet" aria-label="Nom du projet Forge" /><input className="field" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Description (optionnelle)" aria-label="Description du projet Forge" /><button disabled={authBlocked || working || !name.trim()} className="flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 text-xs font-black text-white disabled:opacity-40"><Plus className="h-4 w-4" />Créer</button></form> : null}
         <div className="mt-6 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><h2 className="text-sm font-black text-white">Sessions</h2><button type="button" onClick={addConversation} disabled={authBlocked || project?.status === "archived" || !projectId || working} aria-label="Créer une session Forge" className="rounded-md p-2 text-noline-orange disabled:opacity-30"><Plus className="h-4 w-4" /></button></div><div className="mt-2 space-y-2">{conversations.map((item) => editingConversationId === item.id ? <form key={item.id} onSubmit={(event) => { event.preventDefault(); void saveConversationTitle(item); }} className="flex gap-1"><input autoFocus maxLength={60} value={editingConversationTitle} onChange={(event) => setEditingConversationTitle(event.target.value)} className="field min-w-0 flex-1 px-2 py-1 text-xs" aria-label={`Renommer ${item.title}`} /><button disabled={!editingConversationTitle.trim() || working} aria-label="Enregistrer le titre" className="rounded p-2 text-green-300 disabled:opacity-40"><Check className="h-3.5 w-3.5" /></button><button type="button" onClick={() => setEditingConversationId("")} aria-label="Annuler le renommage" className="rounded p-2 text-noline-muted"><X className="h-3.5 w-3.5" /></button></form> : <div key={item.id} className={`flex items-center rounded-md ${item.id === conversationId ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}><button type="button" onClick={() => selectConversation(item.id)} className="min-w-0 flex-1 truncate px-3 py-2 text-left text-xs font-bold">{item.title}</button><button type="button" onClick={() => { setEditingConversationId(item.id); setEditingConversationTitle(item.title); }} aria-label={`Renommer ${item.title}`} className="rounded p-2 opacity-70"><Pencil className="h-3.5 w-3.5" /></button></div>)}</div></div>
       </aside>
-      <main className="surface premium-border relative flex min-h-[38rem] min-w-0 flex-col overflow-hidden rounded-xl shadow-premium">
+      <main ref={conversationSection} className="surface premium-border relative flex min-h-[38rem] min-w-0 flex-col overflow-hidden rounded-xl shadow-premium">
         <header className="border-b border-white/10 px-5 py-4"><p className="text-xs text-noline-muted">{project?.name || "Aucun projet"}</p><h2 className="mt-1 truncate font-black text-white">{conversation?.title || "Sélectionnez une session"}</h2></header>
         <div ref={messagesViewport} onScroll={(event) => { const node = event.currentTarget; const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 100; followMessages.current = nearBottom; setShowLatestButton(!nearBottom); }} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">{timeline.map((item) => item.kind === "message" ? <ForgeBubble key={item.key} message={item.message} /> : <ForgeAgentActivity key={item.key} payload={item.payload} />)}{!conversationId ? <EmptyChat /> : null}{conversationId && !loading && timeline.length === 0 ? <EmptyChat ready /> : null}</div>{showLatestButton ? <button type="button" onClick={scrollToLatest} aria-label="Revenir aux messages récents" className="absolute bottom-36 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-white/15 bg-noline-black/95 px-3 py-2 text-xs font-black text-white shadow-lg"><ArrowDown className="h-4 w-4" />Récent</button> : null}
         <div className="border-t border-white/10 p-4"><div className="mb-2 flex gap-1" role="group" aria-label="Mode Forge"><button type="button" onClick={() => setComposerMode("chat")} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${composerMode === "chat" ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}>Conversation</button><button type="button" onClick={() => setComposerMode("agent")} disabled={!agentAvailable} className={`rounded px-2 py-1 text-[10px] font-black uppercase disabled:opacity-40 ${composerMode === "agent" ? "bg-noline-orange text-noline-black" : "bg-white/5 text-noline-muted"}`}>Exécuter avec Forge</button>{composerMode === "agent" ? <span className="ml-auto self-center text-[10px] font-black text-noline-muted">{agentActive ? "AGENT EN COURS" : "RUNTIME READY"}</span> : null}</div><form onSubmit={send} className="flex items-end gap-3"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={authBlocked || project?.status === "archived" || !conversationId || working || agentActive} rows={3} className="field flex-1 resize-none font-mono" placeholder={composerMode === "agent" ? "Décrivez la mission à exécuter dans le sandbox…" : "Décrivez le problème, collez du code ou demandez un plan…"} aria-label={composerMode === "agent" ? "Mission pour l’Agent Forge" : "Message pour Forge"} /><button disabled={authBlocked || project?.status === "archived" || !conversationId || !draft.trim() || working || agentActive || (composerMode === "agent" && !agentAvailable)} className="flex h-12 w-12 items-center justify-center rounded-md bg-noline-orange text-noline-black disabled:opacity-40" aria-label={composerMode === "agent" ? "Exécuter avec Forge" : "Envoyer à Forge"}>{working || agentActive ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></form>{notice ? <p role="status" className="mt-2 text-xs text-noline-muted">{notice}</p> : null}</div>

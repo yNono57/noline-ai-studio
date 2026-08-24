@@ -12,6 +12,7 @@ Interdits: accès hôte, secrets, réseau, git commit, git push, PR. Utilise des
 PLAN: {"type":"PLAN","summary":"...","plan":["..."]}
 TOOL_CALL: {"type":"TOOL_CALL","summary":"...","tool":"read_file","input":{"path":"..."}}
 FINAL: {"type":"FINAL","summary":"...","report":"..."}
+N'emets FINAL qu'apres avoir execute les outils necessaires. Le report decrit les resultats effectivement observes, jamais une intention future comme 'je vais...'.
 FAIL: {"type":"FAIL","summary":"...","error":"..."}`;
 
 export const openAIForgeAgentModelProvider: ForgeAgentModelProvider = {

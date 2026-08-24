@@ -7,6 +7,7 @@ const { createForgeAgentRunner, normalizeAgentCommand, normalizeAgentPath, sanit
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
 const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
+const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
 function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false) {
   let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; let commandIndex = 0;
@@ -26,9 +27,10 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
 test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
   const objective = "Inspecte le repository. Liste les fichiers présents à sa racine, puis lis README.md et résume son contenu.";
   const target = harness([
+    { type: "FINAL", summary: "Intention prematuree", report: "Je vais d'abord lister les fichiers a la racine du repository, puis lire README.md pour en resumer le contenu." },
     { type: "TOOL_CALL", summary: "Lister la racine", tool: "list_files", input: { path: "." } },
     { type: "TOOL_CALL", summary: "Lire README.md", tool: "read_file", input: { path: "README.md" } },
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /Repository de validation Forge/); return { type: "FINAL", summary: "Résumé terminé", report: "README.md présente le repository de validation Forge." }; },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /Repository de validation Forge/); return { type: "FINAL", summary: "Résumé terminé", report: "Fichiers racine : README.md, package.json. README.md présente le repository de validation Forge." }; },
   ]);
   const persisted: Array<Record<string, unknown>> = [];
   const result = await submitForgeComposer("agent", objective, {
@@ -40,6 +42,7 @@ test("mission agentique persiste le fil et expose ses étapes réelles sans appe
   });
   assert.equal(result.run.status, "COMPLETED");
   assert.equal(target.steps[0]?.type, "PLAN");
+  assert.ok(target.steps.some((step) => step.type === "FAIL" && step.summary === "Résultat final prématuré"));
   assert.deepEqual(target.lists, ["."]);
   assert.deepEqual(target.reads, ["README.md"]);
   assert.ok(target.steps.some((step) => step.tool === "list_files"));
@@ -47,7 +50,9 @@ test("mission agentique persiste le fil et expose ses étapes réelles sans appe
   assert.equal(persisted[0]?.role, "USER");
   assert.equal(persisted[0]?.content, objective);
   assert.equal(persisted[1]?.role, "ASSISTANT");
+  assert.match(String(persisted[1]?.content), /README\.md, package\.json/);
   assert.match(String(persisted[1]?.content), /repository de validation Forge/i);
+  assert.doesNotMatch(String(persisted[1]?.content), /je vais d'abord lister/i);
   assert.equal((persisted[1]?.metadata as Record<string, unknown>)?.forge_agent_run_id, "run-a");
   assert.equal(persisted.length, 2);
 });
@@ -57,6 +62,28 @@ test("mode Conversation reste séparé du runner agentique", async () => {
   const result = await submitForgeComposer("chat", "Bonjour Forge", { chat: async () => "Réponse conversationnelle", agent: async () => { agentCalled = true; throw new Error("agent appelé"); } });
   assert.equal(result, "Réponse conversationnelle");
   assert.equal(agentCalled, false);
+});
+test("restauration Forge conserve uniquement une session active appartenant au projet actif", () => {
+  const memory = new Map<string, string>();
+  const storage = { getItem: (key: string) => memory.get(key) || null, setItem: (key: string, value: string) => { memory.set(key, value); }, removeItem: (key: string) => { memory.delete(key); } };
+  saveForgeSessionRestore(storage, { projectId: "project-a", conversationId: "conversation-a" });
+  const stored = readForgeSessionRestore(storage);
+  assert.deepEqual(stored, { projectId: "project-a", conversationId: "conversation-a" });
+  assert.deepEqual(resolveForgeSessionRestore(stored, [{ id: "project-a", status: "active" }], [{ id: "conversation-a", forge_project_id: "project-a", status: "active" }]), { projectId: "project-a", conversationId: "conversation-a", valid: true });
+  assert.equal(resolveForgeSessionRestore(stored, [{ id: "project-b", status: "active" }]).valid, false);
+  assert.equal(resolveForgeSessionRestore(stored, [{ id: "project-a", status: "active" }], []).valid, false);
+  clearForgeSessionRestore(storage);
+  assert.equal(readForgeSessionRestore(storage), null);
+  assert.doesNotMatch(JSON.stringify([...memory]), /token|secret|cookie/i);
+});
+
+test("restauration du fil attend messages et AgentRun avant de cibler la conversation mobile", () => {
+  const source = fs.readFileSync("components/ForgeWorkspace.tsx", "utf8");
+  assert.match(source, /Promise\.all\(\[listForgeMessages\(conversationId\), getLatestForgeAgentRun\(conversationId\)\]\)/);
+  assert.match(source, /setRestoreScrollConversationId\(restored\.conversationId\)/);
+  assert.match(source, /restoreScrollConversationId !== conversationId \|\| contentLoadedConversationId !== conversationId/);
+  assert.match(source, /requestAnimationFrame[\s\S]*requestAnimationFrame[\s\S]*messagesViewport\.current\?\.scrollTo[\s\S]*conversationSection\.current\?\.scrollIntoView/);
+  assert.match(source, /Revenir aux messages récents/);
 });
 test("mission Production démarre par un PLAN serveur puis lit réellement package.json", async () => {
   const target = harness([
