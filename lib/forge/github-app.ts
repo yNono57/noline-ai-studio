@@ -11,10 +11,45 @@ export class GitHubAppError extends Error {
   }
 }
 
+function safeErrorName(error: unknown) {
+  if (error instanceof GitHubAppError) return "GitHubAppError";
+  if (error instanceof TypeError) return "TypeError";
+  if (error instanceof RangeError) return "RangeError";
+  if (error instanceof SyntaxError) return "SyntaxError";
+  if (error instanceof Error) return "Error";
+  return "Unknown";
+}
+
+export function logGitHubAuthDiagnostic(stage: string, error?: unknown) {
+  if (error === undefined) {
+    console.info("[forge-github-auth]", { stage });
+    return;
+  }
+  const nodeCode = (error as { code?: unknown } | null)?.code;
+  const errorCode = error instanceof GitHubAppError
+    ? error.code
+    : typeof nodeCode === "string" && /^ERR_[A-Z0-9_]+$/.test(nodeCode)
+      ? nodeCode
+      : undefined;
+  console.error("[forge-github-auth]", {
+    stage,
+    errorName: safeErrorName(error),
+    ...(errorCode ? { errorCode } : {}),
+  });
+}
+
 export function getGitHubAppConfig() {
   const appId = process.env.GITHUB_APP_ID?.trim();
   const slug = process.env.GITHUB_APP_SLUG?.trim();
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  logGitHubAuthDiagnostic("github_private_key_normalization_start");
+  let privateKey: string | undefined;
+  try {
+    privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+    logGitHubAuthDiagnostic("github_private_key_normalization_success");
+  } catch (error) {
+    logGitHubAuthDiagnostic("github_private_key_normalization_failed", error);
+    throw error;
+  }
   const stateSecret = process.env.GITHUB_APP_STATE_SECRET?.trim();
   if (!appId || !/^\d+$/.test(appId) || !slug || !privateKey || !stateSecret) {
     throw new GitHubAppError("CONFIGURATION", "L’intégration GitHub n’est pas configurée.");
@@ -31,10 +66,27 @@ export function createGitHubAppJwt(nowSeconds = Math.floor(Date.now() / 1000)) {
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const payload = base64url(JSON.stringify({ iat: nowSeconds - 60, exp: nowSeconds + 9 * 60, iss: config.appId }));
   const unsigned = `${header}.${payload}`;
-  const signer = createSign("RSA-SHA256");
-  signer.update(unsigned);
-  signer.end();
-  const signature = signer.sign(createPrivateKey(config.privateKey));
+  logGitHubAuthDiagnostic("github_private_key_import_start");
+  let privateKey;
+  try {
+    privateKey = createPrivateKey(config.privateKey);
+    logGitHubAuthDiagnostic("github_private_key_import_success");
+  } catch (error) {
+    logGitHubAuthDiagnostic("github_private_key_import_failed", error);
+    throw error;
+  }
+  logGitHubAuthDiagnostic("github_jwt_sign_start");
+  let signature: Buffer;
+  try {
+    const signer = createSign("RSA-SHA256");
+    signer.update(unsigned);
+    signer.end();
+    signature = signer.sign(privateKey);
+    logGitHubAuthDiagnostic("github_jwt_sign_success");
+  } catch (error) {
+    logGitHubAuthDiagnostic("github_jwt_sign_failed", error);
+    throw error;
+  }
   return `${unsigned}.${base64url(signature)}`;
 }
 
