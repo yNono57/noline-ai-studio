@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Loader2 } from "lucide-react";
 import type { ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeWorkspaceView } from "@/lib/forge/workspace-foundation";
-import { getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
+import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
+import { getForgeRuntime, getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
 
 export function ForgeWorkspaceControl({ project, conversationId }: { project: ForgeProject | undefined; conversationId: string }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
+  const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const sourceKey = `${conversationId}:${project?.repository_identifier || ""}:${project?.default_branch || ""}`;
@@ -22,6 +24,14 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
     getForgeWorkspace(conversationId).then(({ workspace }) => { if (active) setWorkspace(workspace); }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Workspace indisponible."); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [conversationId, project?.default_branch, project?.repository_identifier, project?.repository_provider]);
+
+  useEffect(() => {
+    let active = true;
+    setRuntime(null);
+    if (!conversationId || workspace?.status !== "READY") return () => { active = false; };
+    getForgeRuntime(conversationId).then(({ runtime }) => { if (active) setRuntime(runtime); }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Runtime indisponible."); });
+    return () => { active = false; };
+  }, [conversationId, workspace?.status, workspace?.workspaceId]);
 
   async function prepare() {
     if (!conversationId || loading) return;
@@ -43,5 +53,12 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
     </div>
     <button type="button" onClick={prepare} disabled={!configured || loading || workspace?.status === "READY"} className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 font-black text-white disabled:opacity-40">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{workspace?.status === "READY" ? "Workspace prêt" : "Préparer le workspace"}</button>
     {error ? <p role="alert" className="mt-2 text-red-300">{error}</p> : null}
+    <div className="mt-3 border-t border-white/10 pt-3 text-noline-muted">
+      <div className="flex items-center justify-between gap-2"><span className="font-black text-white">Runtime</span><span className="text-[10px] font-black">{runtime?.status || "NON PROVISIONNÉ"}</span></div>
+      <p className="mt-2">Provider : {runtime?.provider || "unprovisioned"}</p>
+      <p className="font-mono">Base : {(runtime?.baseCommitSha || workspace?.baseCommitSha || "—").slice(0, 12)}</p>
+      {runtime?.expiresAt ? <p>Expiration : {new Date(runtime.expiresAt).toLocaleString("fr-FR")}</p> : null}
+      <p className="mt-2 text-[10px]">Aucun environnement d'exécution isolé n'est configuré.</p>
+    </div>
   </details>;
 }
