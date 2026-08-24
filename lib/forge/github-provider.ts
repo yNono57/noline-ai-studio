@@ -1,7 +1,7 @@
 import "server-only";
 
 import { FORGE_GITHUB_LIMITS, type ForgeGitHubBranch, type ForgeGitHubFile, type ForgeGitHubRepository, type ForgeGitHubSearchResult, type ForgeGitHubTreeEntry } from "./github-foundation";
-import { createGitHubAppJwt, GitHubAppError, logGitHubAuthDiagnostic } from "./github-app";
+import { createGitHubAppJwt, GitHubAppError } from "./github-app";
 
 const API = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -29,16 +29,8 @@ export async function getInstallationToken(installationId: string) {
 }
 
 export async function getInstallationMetadata(installationId: string) {
-  const jwt = createGitHubAppJwt();
-  logGitHubAuthDiagnostic("github_installation_request_start");
-  try {
-    const data = await github<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; suspended_at: string | null }>(`/app/installations/${installationId}`, jwt);
-    logGitHubAuthDiagnostic("github_installation_request_response");
-    return { installationId: String(data.id), accountId: String(data.account.id), accountLogin: data.account.login, accountType: data.account.type, status: data.suspended_at ? "revoked" as const : "active" as const };
-  } catch (error) {
-    logGitHubAuthDiagnostic("github_installation_request_failed", error);
-    throw error;
-  }
+  const data = await github<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; suspended_at: string | null }>(`/app/installations/${installationId}`, createGitHubAppJwt());
+  return { installationId: String(data.id), accountId: String(data.account.id), accountLogin: data.account.login, accountType: data.account.type, status: data.suspended_at ? "revoked" as const : "active" as const };
 }
 
 function mapRepository(repo: GitHubRepositoryResponse): ForgeGitHubRepository & { visibility: string; description: string | null; updatedAt: string } {

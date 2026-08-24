@@ -19,10 +19,6 @@ function stateCookie(request: Request) {
     ?.slice("forge_github_state=".length);
 }
 
-function logStage(stage: string) {
-  console.info("[forge-github-callback]", { stage });
-}
-
 function safeErrorType(error: unknown) {
   if (error instanceof GitHubAppError) return "GitHubAppError";
   if (error instanceof TypeError) return "TypeError";
@@ -49,19 +45,14 @@ export async function GET(request: Request) {
       url.searchParams.get("state") || "",
       stateCookie(request),
     );
-    logStage("callback_state_validated");
 
     stage = "github_installation_metadata";
-    logStage("github_installation_metadata_start");
     const metadata = await getInstallationMetadata(
       url.searchParams.get("installation_id") || "",
     );
-    logStage("github_installation_metadata_success");
 
     stage = "supabase_connection_upsert";
-    logStage("supabase_connection_upsert_start");
     await upsertGitHubConnection(verified.userId, metadata);
-    logStage("supabase_connection_upsert_success");
 
     stage = "callback_redirect";
     const response = NextResponse.redirect(
@@ -74,7 +65,6 @@ export async function GET(request: Request) {
       path: "/api/forge/github/callback",
       maxAge: 0,
     });
-    logStage("callback_redirect_success");
     return response;
   } catch (error) {
     logStageFailure(stage, error);
