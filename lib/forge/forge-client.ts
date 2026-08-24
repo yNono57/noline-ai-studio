@@ -100,7 +100,7 @@ export function getForgeRuntimeGitDiff(conversationId: string, limit?: number) {
 
 export type ForgeAgentRunPayload = { run: ForgeAgentRunView; steps: ForgeAgentStep[] };
 export function getLatestForgeAgentRun(conversationId: string) { return request<{ agentRun: ForgeAgentRunPayload | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`); }
-export function startForgeAgentRun(conversationId: string, objective: string) { return request<{ agentRun: ForgeAgentRunPayload; conversation: ForgeConversation }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective }) }); }
+export function startForgeAgentRun(conversationId: string, objective: string) { return request<{ agentRun: ForgeAgentRunPayload; conversation: ForgeConversation; user_message: ForgeMessage; assistant_message: ForgeMessage | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective }) }); }
 export function cancelForgeAgentRun(conversationId: string, runId: string) { return request<{ run: ForgeAgentRunView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs/${encodeURIComponent(runId)}`, { method: "DELETE" }); }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let auth = await getAuthenticatedHeaders();

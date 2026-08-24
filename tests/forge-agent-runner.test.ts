@@ -6,9 +6,10 @@ const fs = require("node:fs");
 const { createForgeAgentRunner, normalizeAgentCommand, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
+const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
 
 function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false) {
-  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const contexts: Array<Record<string, unknown>> = []; let commandIndex = 0;
+  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
@@ -16,12 +17,47 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles() { return [{ path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); return { path, size: 20, content: '{"name":"noline-forge-testbed"}' }; }, async writeFile(path: string) { writes.push(path); return { path, size: 10, content: "changed" }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/index.ts"], deleted: [], patch: "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles(path: string) { lists.push(path); return [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); const content = path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'; return { path, size: content.length, content }; }, async writeFile(path: string) { writes.push(path); return { path, size: 10, content: "changed" }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/index.ts"], deleted: [], patch: "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, contexts };
+  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, lists, contexts };
 }
 
+test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
+  const objective = "Inspecte le repository. Liste les fichiers présents à sa racine, puis lis README.md et résume son contenu.";
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lister la racine", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Lire README.md", tool: "read_file", input: { path: "README.md" } },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /Repository de validation Forge/); return { type: "FINAL", summary: "Résumé terminé", report: "README.md présente le repository de validation Forge." }; },
+  ]);
+  const persisted: Array<Record<string, unknown>> = [];
+  const result = await submitForgeComposer("agent", objective, {
+    chat: async () => { throw new Error("chat classique appelé"); },
+    agent: () => runForgeAgentConversation({ objective }, {
+      createMessage: async (message: Record<string, unknown>) => { const persistedMessage = { id: `message-${persisted.length + 1}`, conversation_id: "conversation-a", ...message, created_at: `2026-08-24T00:00:0${persisted.length}.000Z` }; persisted.push(persistedMessage); return persistedMessage; },
+      runAgent: () => target.runner.run("user-a", "conversation-a", objective),
+    }),
+  });
+  assert.equal(result.run.status, "COMPLETED");
+  assert.equal(target.steps[0]?.type, "PLAN");
+  assert.deepEqual(target.lists, ["."]);
+  assert.deepEqual(target.reads, ["README.md"]);
+  assert.ok(target.steps.some((step) => step.tool === "list_files"));
+  assert.ok(target.steps.some((step) => step.tool === "read_file"));
+  assert.equal(persisted[0]?.role, "USER");
+  assert.equal(persisted[0]?.content, objective);
+  assert.equal(persisted[1]?.role, "ASSISTANT");
+  assert.match(String(persisted[1]?.content), /repository de validation Forge/i);
+  assert.equal((persisted[1]?.metadata as Record<string, unknown>)?.forge_agent_run_id, "run-a");
+  assert.equal(persisted.length, 2);
+});
+
+test("mode Conversation reste séparé du runner agentique", async () => {
+  let agentCalled = false;
+  const result = await submitForgeComposer("chat", "Bonjour Forge", { chat: async () => "Réponse conversationnelle", agent: async () => { agentCalled = true; throw new Error("agent appelé"); } });
+  assert.equal(result, "Réponse conversationnelle");
+  assert.equal(agentCalled, false);
+});
 test("mission Production démarre par un PLAN serveur puis lit réellement package.json", async () => {
   const target = harness([
     { type: "TOOL_CALL", summary: "Lire package.json", tool: "read_file", input: { path: "package.json" } },
