@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Archive, Check, Code2, Copy, GitBranch, Github, Loader2, MoreHorizontal, Plus, RotateCcw, Send, TerminalSquare, Trash2 } from "lucide-react";
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "@/lib/forge/forge-store";
+import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
+import { ForgeGitHubPanel } from "@/components/ForgeGitHubPanel";
 import {
   createForgeConversation,
   createForgeProject,
@@ -32,6 +34,7 @@ export function ForgeWorkspace() {
   const [authBlocked, setAuthBlocked] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [contextByConversation, setContextByConversation] = useState<Record<string, ForgeGitHubFile[]>>({});
 
   const handleError = useCallback((caught: unknown) => {
     if (caught instanceof ForgeClientError && caught.status === 401) {
@@ -131,7 +134,7 @@ export function ForgeWorkspace() {
     if (!conversationId || !draft.trim() || working) return;
     setWorking(true); setError(""); setNotice("Forge analyse votre demande…");
     try {
-      const result = await sendForgeMessage(conversationId, draft.trim(), retryMessageId);
+      const result = await sendForgeMessage(conversationId, draft.trim(), retryMessageId, (contextByConversation[conversationId] || []).map((file) => file.path));
       setMessages((current) => mergeMessages(current, [result.user_message, result.assistant_message]));
       setDraft(""); setRetryMessageId(null); setNotice("");
     } catch (caught) {
@@ -166,7 +169,7 @@ export function ForgeWorkspace() {
         <div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.map((message) => <ForgeBubble key={message.id} message={message} />)}{!conversationId ? <EmptyChat /> : null}{conversationId && !loading && messages.length === 0 ? <EmptyChat ready /> : null}</div>
         <div className="border-t border-white/10 p-4"><form onSubmit={send} className="flex items-end gap-3"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={authBlocked || project?.status === "archived" || !conversationId || working} rows={3} className="field flex-1 resize-none font-mono" placeholder="Décrivez le problème, collez du code ou demandez un plan…" aria-label="Message pour Forge" /><button disabled={authBlocked || project?.status === "archived" || !conversationId || !draft.trim() || working} className="flex h-12 w-12 items-center justify-center rounded-md bg-noline-orange text-noline-black disabled:opacity-40" aria-label="Envoyer à Forge">{working ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></form>{notice ? <p role="status" className="mt-2 text-xs text-noline-muted">{notice}</p> : null}</div>
       </main>
-      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers modifiés" value="Aucun accès" /><ContextRow icon={TerminalSquare} label="Outils" value="Non connectés" /></div><div className="mt-6 rounded-lg border border-noline-orange/25 bg-noline-orange/8 p-3 text-xs leading-5 text-noline-muted">Forge V1 converse et raisonne sur les éléments fournis. Aucun fichier, terminal ou repository n’est accessible.</div></aside>
+      <aside className="surface premium-border rounded-xl p-4 shadow-premium"><h2 className="text-sm font-black text-white">Contexte projet</h2><div className="mt-4 space-y-3"><ContextRow icon={Github} label="Repository" value={project?.repository_identifier || "Non connecté"} /><ContextRow icon={GitBranch} label="Branche" value={project?.default_branch || "Non connectée"} /><ContextRow icon={Code2} label="Fichiers actifs" value={`${(contextByConversation[conversationId] || []).length} fichier(s)`} /><ContextRow icon={TerminalSquare} label="Accès" value="GitHub lecture seule" /></div><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></aside>
     </div>
   </div>;
 }

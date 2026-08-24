@@ -40,9 +40,9 @@ export async function listForgeMessages(conversationId: string) {
   return (await request<{ messages: ForgeMessage[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/messages`)).messages;
 }
 
-export function sendForgeMessage(conversationId: string, content: string, userMessageId?: string | null) {
+export function sendForgeMessage(conversationId: string, content: string, userMessageId?: string | null, contextPaths: string[] = []) {
   return request<{ user_message: ForgeMessage; assistant_message: ForgeMessage }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/messages`, {
-    method: "POST", body: JSON.stringify({ content, ...(userMessageId ? { user_message_id: userMessageId } : {}) })
+    method: "POST", body: JSON.stringify({ content, context_paths: contextPaths, ...(userMessageId ? { user_message_id: userMessageId } : {}) })
   });
 }
 

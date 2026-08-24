@@ -33,7 +33,11 @@ export async function parseForgeMessageInput(request: Request) {
   if (body.user_message_id !== undefined && typeof body.user_message_id !== "string") {
     throw invalid("user_message_id doit être une chaîne.");
   }
-  return { content: requiredString(body.content, "content"), userMessageId: body.user_message_id?.trim() || null };
+  if (body.context_paths !== undefined && (!Array.isArray(body.context_paths) || body.context_paths.some((path) => typeof path !== "string"))) throw invalid("context_paths doit être une liste de chemins.");
+  const rawPaths = (body.context_paths as string[] | undefined) || [];
+  const contextPaths = [...new Set(rawPaths.map((path) => path.trim()).filter(Boolean))];
+  if (contextPaths.length > 12) throw invalid("12 fichiers maximum sont autorisés dans le contexte.");
+  return { content: requiredString(body.content, "content"), userMessageId: body.user_message_id?.trim() || null, contextPaths };
 }
 
 export async function parseForgeStatusInput(request: Request) {
