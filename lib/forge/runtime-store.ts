@@ -17,10 +17,10 @@ export async function findRuntimeByWorkspace(userId: string, workspaceId: string
 export async function insertForgeRuntime(input: Omit<ForgeRuntime, "runtimeId" | "createdAt" | "updatedAt">) {
   const body = { workspace_id: input.workspaceId, user_id: input.userId, provider: input.provider, provider_runtime_id: input.providerRuntimeId, status: input.status, base_commit_sha: input.baseCommitSha, ready_at: input.readyAt, expires_at: input.expiresAt, last_activity_at: input.lastActivityAt, error_code: input.errorCode };
   const data = await rows("/rest/v1/forge_workspace_runtimes?on_conflict=workspace_id,provider", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify(body) });
-  if (data[0]) return map(data[0]);
+  if (data[0]) return { runtime: map(data[0]), created: true };
   const existing = await findRuntimeByWorkspace(input.userId, input.workspaceId, input.provider);
   if (!existing) throw new ForgeRuntimeError("PERSISTENCE", "Le runtime Forge n’a pas pu être créé.");
-  return existing;
+  return { runtime: existing, created: false };
 }
 
 export async function updateForgeRuntime(userId: string, runtimeId: string, input: RuntimeUpdate) {

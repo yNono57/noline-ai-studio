@@ -28,6 +28,14 @@ export async function getInstallationToken(installationId: string) {
   return result.token;
 }
 
+export async function getRepositoryInstallationToken(installationId: string, owner: string, repo: string) {
+  if (!/^\d+$/.test(installationId) || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) throw new GitHubAppError("AUTHORIZATION", "Repository GitHub invalide.");
+  const result = await github<InstallationToken>(`/app/installations/${installationId}/access_tokens`, createGitHubAppJwt(), { method: "POST", body: JSON.stringify({ repositories: [repo], permissions: { contents: "read" } }) });
+  const repository = await github<GitHubRepositoryResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, result.token);
+  if (repository.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) throw new GitHubAppError("AUTHORIZATION", "Repository non autorise.");
+  return result.token;
+}
+
 export async function getInstallationMetadata(installationId: string) {
   const data = await github<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; suspended_at: string | null }>(`/app/installations/${installationId}`, createGitHubAppJwt());
   return { installationId: String(data.id), accountId: String(data.account.id), accountLogin: data.account.login, accountType: data.account.type, status: data.suspended_at ? "revoked" as const : "active" as const };

@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Loader2 } from "lucide-react";
+import { Box, Loader2, Play, Trash2 } from "lucide-react";
 import type { ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeWorkspaceView } from "@/lib/forge/workspace-foundation";
 import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
-import { getForgeRuntime, getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
+import { createForgeRuntime, destroyForgeRuntime, getForgeRuntime, getForgeWorkspace, prepareForgeWorkspace } from "@/lib/forge/forge-client";
 
 export function ForgeWorkspaceControl({ project, conversationId }: { project: ForgeProject | undefined; conversationId: string }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
   const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [error, setError] = useState("");
   const sourceKey = `${conversationId}:${project?.repository_identifier || ""}:${project?.default_branch || ""}`;
   const sourceKeyRef = useRef(sourceKey);
@@ -42,6 +43,23 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
     finally { if (sourceKeyRef.current === requestedSource) setLoading(false); }
   }
 
+  async function startRuntime() {
+    if (!conversationId || runtimeLoading || workspace?.status !== "READY") return;
+    setRuntimeLoading(true); setError("");
+    try { setRuntime((await createForgeRuntime(conversationId)).runtime); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Creation du runtime impossible."); }
+    finally { setRuntimeLoading(false); }
+  }
+
+  async function destroyRuntime() {
+    if (!conversationId || runtimeLoading || !runtime) return;
+    setRuntimeLoading(true); setError("");
+    try { setRuntime((await destroyForgeRuntime(conversationId)).runtime); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Destruction du runtime impossible."); }
+    finally { setRuntimeLoading(false); }
+  }
+
+  const runtimeLabel = runtime?.status === "CREATING" ? "CRÉATION…" : runtime?.status === "EXPIRED" ? "EXPIRÉ" : runtime?.status === "DESTROYING" ? "DESTRUCTION…" : runtime?.status === "DESTROYED" ? "DÉTRUIT" : runtime?.status || "NON PROVISIONNÉ";
   const configured = Boolean(conversationId && project?.repository_provider === "github" && project.repository_identifier && project.default_branch);
   return <details className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-xs">
     <summary className="flex cursor-pointer list-none items-center gap-2 font-black text-white"><Box className="h-4 w-4 text-noline-orange" />Workspace<span className="ml-auto text-[10px] text-noline-muted">{workspace?.status || "NON PRÉPARÉ"}</span></summary>
@@ -54,11 +72,17 @@ export function ForgeWorkspaceControl({ project, conversationId }: { project: Fo
     <button type="button" onClick={prepare} disabled={!configured || loading || workspace?.status === "READY"} className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 font-black text-white disabled:opacity-40">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{workspace?.status === "READY" ? "Workspace prêt" : "Préparer le workspace"}</button>
     {error ? <p role="alert" className="mt-2 text-red-300">{error}</p> : null}
     <div className="mt-3 border-t border-white/10 pt-3 text-noline-muted">
-      <div className="flex items-center justify-between gap-2"><span className="font-black text-white">Runtime</span><span className="text-[10px] font-black">{runtime?.status || "NON PROVISIONNÉ"}</span></div>
-      <p className="mt-2">Provider : {runtime?.provider || "unprovisioned"}</p>
+      <div className="flex items-center justify-between gap-2"><span className="font-black text-white">Runtime</span><span className="text-[10px] font-black">{runtimeLabel}</span></div>
+      <p className="mt-2">Provider : {runtime?.provider || "daytona"}</p>
       <p className="font-mono">Base : {(runtime?.baseCommitSha || workspace?.baseCommitSha || "—").slice(0, 12)}</p>
       {runtime?.expiresAt ? <p>Expiration : {new Date(runtime.expiresAt).toLocaleString("fr-FR")}</p> : null}
-      <p className="mt-2 text-[10px]">Aucun environnement d'exécution isolé n'est configuré.</p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <button type="button" onClick={startRuntime} disabled={runtimeLoading || workspace?.status !== "READY" || runtime?.status === "READY" || runtime?.status === "CREATING" || runtime?.status === "DESTROYING"} className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-md bg-noline-orange px-3 py-2 font-black text-white disabled:opacity-40">
+          {runtimeLoading || runtime?.status === "CREATING" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{runtime?.status === "READY" ? "Runtime prêt" : "Démarrer le runtime"}
+        </button>
+        {runtime ? <button type="button" onClick={destroyRuntime} disabled={runtimeLoading || runtime.status === "DESTROYED" || runtime.status === "DESTROYING" || runtime.status === "CREATING"} aria-label="Détruire le runtime" className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2 font-black text-white disabled:opacity-40"><Trash2 className="h-4 w-4" />Détruire</button> : null}
+      </div>
+      <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
     </div>
   </details>;
 }

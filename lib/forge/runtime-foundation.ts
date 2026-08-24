@@ -19,11 +19,12 @@ export type ForgeRuntime = {
 };
 
 export type ForgeRuntimeView = Omit<ForgeRuntime, "userId" | "providerRuntimeId">;
-export type ForgeRuntimeSource = { repository: string; branch: string; baseCommitSha: string };
+export type ForgeRuntimeSourceCredential = { username: string; password: string };
+export type ForgeRuntimeSource = { repository: string; branch: string; baseCommitSha: string; credential?: ForgeRuntimeSourceCredential };
 export type ForgeRuntimeFile = { path: string; size: number; content: string };
 export type ForgeRuntimeFileEntry = { path: string; type: "file" | "directory"; size: number | null };
 export type ForgeRuntimeCommand = { command: string; args: string[]; cwd: string; timeoutMs: number; maxOutputBytes: number };
-export type ForgeRuntimeCommandResult = { stdout: string; stderr: string; exitCode: number | null; truncated: boolean; durationMs: number };
+export type ForgeRuntimeCommandResult = { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number };
 export type ForgeRuntimeGitStatus = { added: string[]; modified: string[]; deleted: string[] };
 export type ForgeRuntimeGitDiff = ForgeRuntimeGitStatus & { patch: string; truncated: boolean };
 
@@ -84,7 +85,7 @@ export function normalizeRuntimeCommand(input: Partial<ForgeRuntimeCommand>): Fo
   return { command: input.command, args: input.args, cwd: normalizeRuntimePath(input.cwd || ".", true), timeoutMs, maxOutputBytes };
 }
 
-export function normalizeRuntimeDiffLimit(value = FORGE_RUNTIME_LIMITS.maxDiffCharacters) {
+export function normalizeRuntimeDiffLimit(value: number = FORGE_RUNTIME_LIMITS.maxDiffCharacters) {
   if (!Number.isInteger(value) || value < 1 || value > FORGE_RUNTIME_LIMITS.maxDiffCharacters) throw new ForgeRuntimeError("INVALID_INPUT", "Limite de diff runtime invalide.");
   return value;
 }
@@ -104,8 +105,9 @@ export type RuntimeUpdate = Partial<Pick<ForgeRuntime, "providerRuntimeId" | "st
 export type ForgeRuntimeServiceDependencies = {
   getOwnedWorkspace(userId: string, conversationId: string): Promise<OwnedWorkspace | null>;
   findByWorkspace(userId: string, workspaceId: string, provider: string): Promise<ForgeRuntime | null>;
-  insert(input: Omit<ForgeRuntime, "runtimeId" | "createdAt" | "updatedAt">): Promise<ForgeRuntime>;
+  insert(input: Omit<ForgeRuntime, "runtimeId" | "createdAt" | "updatedAt">): Promise<{ runtime: ForgeRuntime; created: boolean }>;
   update(userId: string, runtimeId: string, input: RuntimeUpdate): Promise<ForgeRuntime>;
+  getSourceCredential?(userId: string, repository: string): Promise<ForgeRuntimeSourceCredential>;
   provider: ForgeRuntimeProvider;
   now(): string;
 };
@@ -133,16 +135,22 @@ export function createForgeRuntimeService(deps: ForgeRuntimeServiceDependencies)
       if (["DESTROYING", "DESTROYED", "EXPIRED"].includes(existing.status)) throw new ForgeRuntimeError("CONFLICT", "Ce runtime ne peut pas être recréé dans son état actuel.");
       return existing;
     }
-    let runtime = await deps.insert({ workspaceId: workspace.workspaceId, userId, provider: deps.provider.name, providerRuntimeId: null, status: deps.provider.provisioningAvailable ? "CREATING" : "UNPROVISIONED", baseCommitSha: workspace.baseCommitSha, readyAt: null, expiresAt: null, lastActivityAt: null, errorCode: null });
+    const inserted = await deps.insert({ workspaceId: workspace.workspaceId, userId, provider: deps.provider.name, providerRuntimeId: null, status: deps.provider.provisioningAvailable ? "CREATING" : "UNPROVISIONED", baseCommitSha: workspace.baseCommitSha, readyAt: null, expiresAt: null, lastActivityAt: null, errorCode: null });
+    let runtime = inserted.runtime;
+    if (!inserted.created) return runtime;
     if (!deps.provider.provisioningAvailable) return runtime;
+    const runtimeSource: ForgeRuntimeSource = { repository: workspace.repository, branch: workspace.branch, baseCommitSha: workspace.baseCommitSha };
     try {
-      const provisioned = await deps.provider.createRuntime(runtime, { repository: workspace.repository, branch: workspace.branch, baseCommitSha: workspace.baseCommitSha });
+      if (deps.getSourceCredential) runtimeSource.credential = await deps.getSourceCredential(userId, workspace.repository);
+      const provisioned = await deps.provider.createRuntime(runtime, runtimeSource);
       assertRuntimeTransition(runtime.status, provisioned.status);
       runtime = await deps.update(userId, runtime.runtimeId, { providerRuntimeId: provisioned.providerRuntimeId, status: provisioned.status, readyAt: provisioned.readyAt, expiresAt: provisioned.expiresAt, lastActivityAt: deps.now(), errorCode: null });
       return runtime;
     } catch (error) {
       await deps.update(userId, runtime.runtimeId, { status: "ERROR", errorCode: "PROVISION_FAILED" });
       throw error;
+    } finally {
+      delete runtimeSource.credential;
     }
   }
 
@@ -172,5 +180,37 @@ export function createForgeRuntimeService(deps: ForgeRuntimeServiceDependencies)
     catch (error) { await deps.update(userId, runtime.runtimeId, { status: "ERROR", errorCode: "DESTROY_FAILED" }); throw error; }
   }
 
-  return { create, get, destroy };
+  async function ready(userId: string, conversationId: string) {
+    const workspace = await source(userId, conversationId);
+    let runtime = await deps.findByWorkspace(userId, workspace.workspaceId, deps.provider.name);
+    if (!runtime) throw new ForgeRuntimeError("NOT_FOUND", "Runtime Forge introuvable ou inaccessible.");
+    ensureRelation(runtime, workspace);
+    if (runtime.status === "READY" && runtime.expiresAt && Date.parse(runtime.expiresAt) <= Date.parse(deps.now())) runtime = await deps.update(userId, runtime.runtimeId, { status: "EXPIRED" });
+    assertRuntimeReady(runtime, Date.parse(deps.now()));
+    return runtime;
+  }
+
+  async function touch(userId: string, runtime: ForgeRuntime) { await deps.update(userId, runtime.runtimeId, { lastActivityAt: deps.now() }); }
+
+  async function readFile(userId: string, conversationId: string, path: string) {
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.readFile(runtime, normalizeRuntimePath(path)); await touch(userId, runtime); return result;
+  }
+  async function writeFile(userId: string, conversationId: string, path: string, content: string) {
+    if (typeof content !== "string" || content.length > FORGE_RUNTIME_LIMITS.maxFileCharacters) throw new ForgeRuntimeError("INVALID_INPUT", "Contenu runtime trop volumineux.");
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.writeFile(runtime, normalizeRuntimePath(path), content); await touch(userId, runtime); return result;
+  }
+  async function listFiles(userId: string, conversationId: string, path = ".") {
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.listFiles(runtime, normalizeRuntimePath(path, true)); await touch(userId, runtime); return result.slice(0, FORGE_RUNTIME_LIMITS.maxListEntries);
+  }
+  async function executeCommand(userId: string, conversationId: string, input: Partial<ForgeRuntimeCommand>) {
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.executeCommand(runtime, normalizeRuntimeCommand(input)); await touch(userId, runtime); return result;
+  }
+  async function getGitStatus(userId: string, conversationId: string) {
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.getGitStatus(runtime); await touch(userId, runtime); return result;
+  }
+  async function getGitDiff(userId: string, conversationId: string, maxPatchCharacters?: number) {
+    const runtime = await ready(userId, conversationId); const result = await deps.provider.getGitDiff(runtime, normalizeRuntimeDiffLimit(maxPatchCharacters)); await touch(userId, runtime); return result;
+  }
+
+  return { create, get, destroy, readFile, writeFile, listFiles, executeCommand, getGitStatus, getGitDiff };
 }

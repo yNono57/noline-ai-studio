@@ -26,7 +26,7 @@ function runtimeHarness() {
   const deps = {
     async getOwnedWorkspace(userId: string, conversationId: string) { return userId === "user-a" && conversationId === "conversation-a" ? workspace : null; },
     async findByWorkspace(userId: string, workspaceId: string, providerName: string) { return runtimes.find((item) => item.userId === userId && item.workspaceId === workspaceId && item.provider === providerName) || null; },
-    async insert(input: Record<string, unknown>) { const row = { ...input, runtimeId: `runtime-${runtimes.length + 1}`, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" }; runtimes.push(row); return row; },
+    async insert(input: Record<string, unknown>) { const row = { ...input, runtimeId: `runtime-${runtimes.length + 1}`, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" }; runtimes.push(row); return { runtime: row, created: true }; },
     async update(_userId: string, runtimeId: string, input: Record<string, unknown>) { const row = runtimes.find((item) => item.runtimeId === runtimeId); if (!row) throw new Error("missing runtime"); Object.assign(row, input); return row; },
     provider,
     now: () => "2026-08-24T00:00:02.000Z",

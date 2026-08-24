@@ -1,6 +1,6 @@
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "./forge-store";
 import type { ForgeWorkspaceView } from "./workspace-foundation";
-import type { ForgeRuntimeView } from "./runtime-foundation";
+import type { ForgeRuntimeCommand, ForgeRuntimeCommandResult, ForgeRuntimeFile, ForgeRuntimeFileEntry, ForgeRuntimeGitDiff, ForgeRuntimeGitStatus, ForgeRuntimeView } from "./runtime-foundation";
 import { getAuthenticatedHeaders } from "../supabase-client";
 
 export class ForgeClientError extends Error {
@@ -70,6 +70,25 @@ export function createForgeRuntime(conversationId: string) {
 
 export function destroyForgeRuntime(conversationId: string) {
   return request<{ runtime: ForgeRuntimeView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime`, { method: "DELETE" });
+}
+export function readForgeRuntimeFile(conversationId: string, path: string) {
+  return request<{ file: ForgeRuntimeFile }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/file?path=${encodeURIComponent(path)}`);
+}
+export function writeForgeRuntimeFile(conversationId: string, path: string, content: string) {
+  return request<{ file: ForgeRuntimeFile }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/file`, { method: "PUT", body: JSON.stringify({ path, content }) });
+}
+export function listForgeRuntimeFiles(conversationId: string, path = ".") {
+  return request<{ files: ForgeRuntimeFileEntry[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/files?path=${encodeURIComponent(path)}`);
+}
+export function executeForgeRuntimeCommand(conversationId: string, command: ForgeRuntimeCommand) {
+  return request<{ result: ForgeRuntimeCommandResult }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/command`, { method: "POST", body: JSON.stringify(command) });
+}
+export function getForgeRuntimeGitStatus(conversationId: string) {
+  return request<{ status: ForgeRuntimeGitStatus }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/git/status`);
+}
+export function getForgeRuntimeGitDiff(conversationId: string, limit?: number) {
+  const query = limit === undefined ? "" : `?limit=${encodeURIComponent(String(limit))}`;
+  return request<{ diff: ForgeRuntimeGitDiff }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/git/diff${query}`);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
