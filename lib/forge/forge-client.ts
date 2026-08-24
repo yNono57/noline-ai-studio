@@ -1,4 +1,5 @@
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "./forge-store";
+import type { ForgeWorkspaceView } from "./workspace-foundation";
 import { getAuthenticatedHeaders } from "../supabase-client";
 
 export class ForgeClientError extends Error {
@@ -44,6 +45,18 @@ export function sendForgeMessage(conversationId: string, content: string, userMe
   return request<{ user_message: ForgeMessage; assistant_message: ForgeMessage }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST", body: JSON.stringify({ content, context_paths: contextPaths, ...(userMessageId ? { user_message_id: userMessageId } : {}) })
   });
+}
+
+export function getForgeWorkspace(conversationId: string) {
+  return request<{ workspace: ForgeWorkspaceView | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace`);
+}
+
+export function prepareForgeWorkspace(conversationId: string) {
+  return request<{ workspace: ForgeWorkspaceView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace`, { method: "POST" });
+}
+
+export function expireForgeWorkspace(conversationId: string) {
+  return request<{ workspace: ForgeWorkspaceView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace`, { method: "DELETE" });
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
