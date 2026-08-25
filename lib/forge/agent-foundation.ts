@@ -25,8 +25,10 @@ type ForgeValidationRecovery = {
   candidateFiles: string[];
   correctionMutationVersion: number | null;
 };
-export type ForgeAgentModelContext = { objective: string; repository: string; branch: string; baseCommitSha: string; status: ForgeAgentRunStatus; steps: Array<{ type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: ForgeAgentStep["status"] }> };
-export interface ForgeAgentModelProvider { readonly key: string; decide(context: ForgeAgentModelContext): Promise<ForgeAgentDecision>; }
+export type ForgeAgentPhase = "NORMAL" | "DIAGNOSTIC" | "CORRECTION_REQUIRED" | "REVALIDATION_REQUIRED";
+export type ForgeAgentDecisionConstraint = { phase: ForgeAgentPhase; allowedDecisionTypes: ForgeAgentDecision["type"][]; allowedTools: ForgeAgentToolName[]; instruction: string };
+export type ForgeAgentModelContext = { objective: string; repository: string; branch: string; baseCommitSha: string; status: ForgeAgentRunStatus; phase: ForgeAgentPhase; steps: Array<{ type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: ForgeAgentStep["status"] }> };
+export interface ForgeAgentModelProvider { readonly key: string; decide(context: ForgeAgentModelContext, constraint?: ForgeAgentDecisionConstraint): Promise<ForgeAgentDecision>; }
 export interface ForgeAgentRuntimeAdapter { listFiles(path: string): Promise<ForgeRuntimeFileEntry[]>; readFile(path: string): Promise<ForgeRuntimeFile>; writeFile(path: string, content: string): Promise<ForgeRuntimeFile>; deleteFile(path: string): Promise<void>; executeCommand(command: Partial<ForgeRuntimeCommand>): Promise<ForgeRuntimeCommandResult>; getGitStatus(): Promise<ForgeRuntimeGitStatus>; getGitDiff(): Promise<ForgeRuntimeGitDiff>; }
 export class ForgeAgentError extends Error { constructor(readonly code: "UNAUTHENTICATED" | "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT" | "LIMIT" | "CANCELLED" | "MODEL" | "PERSISTENCE", message: string) { super(message); this.name = "ForgeAgentError"; } }
 export function publicAgentRun(run: ForgeAgentRun): ForgeAgentRunView { const { userId, ...view } = run; void userId; return view; }
@@ -102,10 +104,12 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
       for (let number = 2; number <= FORGE_AGENT_LIMITS.maxSteps; number += 1) {
         if (Date.now() - started > FORGE_AGENT_LIMITS.maxRuntimeSeconds * 1000) throw new ForgeAgentError("LIMIT", "Durée maximale du run atteinte.");
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
-        const decision = await deps.model.decide({
-          objective, repository: context.repository, branch: context.branch, baseCommitSha: context.baseCommitSha, status: run.status,
+        const phase = currentAgentPhase(validationRecovery);
+        const decisionContext: ForgeAgentModelContext = {
+          objective, repository: context.repository, branch: context.branch, baseCommitSha: context.baseCommitSha, status: run.status, phase,
           steps: steps.slice(-12).map(({ type, summary, tool, input, resultSummary, status }) => ({ type, summary, tool, input, resultSummary: resultSummary?.slice(0, 8_000) || null, status })),
-        });
+        };
+        const decision = forcedPhaseDecision(phase, validationRecovery) ?? await decideForPhase(deps.model, decisionContext, phase, validationRecovery);
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
         const now = deps.now();
         if (decision.type === "PLAN") {
@@ -182,7 +186,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               stalledDecisions = 0;
               prematureTerminations = 0;
               if (commandKey) failedValidationCommands.delete(commandKey);
-              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
+              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
               if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && validationRecovery && mutationVersion > validationRecovery.failureMutationVersion) validationRecovery = null; }
               if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(inspectionSignature); inspectionSatisfied = true; }
               if (validationRecovery && decision.tool === "list_files") validationRecovery.inspectionsSinceFailure.add(normalizeAgentPath(decision.input.path ?? ".", true));
@@ -204,6 +208,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             const missingOptionalFile = decision.tool === "read_file" && hasErrorCode(error, "NOT_FOUND");
             if (missingOptionalFile) stalledDecisions = 0;
             if (missingOptionalFile) knownMissingInspections.add(inspectionSignature);
+            if (missingOptionalFile && validationRecovery && decision.tool === "read_file") { const missingPath = normalizeAgentPath(decision.input.path); validationRecovery.inspectionsSinceFailure.add(missingPath); validationRecovery.candidateFiles = validationRecovery.candidateFiles.filter((path) => path !== missingPath); }
             if (!missingOptionalFile && isBlockingToolError(error)) blockingToolFailures += 1;
             const reason = sanitizeAgentText(error instanceof Error ? error.message : "Outil en échec.", 1000);
             const code = getErrorCode(error);
@@ -294,6 +299,46 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
   return { run };
 }
 
+function currentAgentPhase(recovery: ForgeValidationRecovery | null): ForgeAgentPhase {
+  if (!recovery) return "NORMAL";
+  if (recovery.correctionMutationVersion !== null) return "REVALIDATION_REQUIRED";
+  if (recovery.filesReadSinceFailure.size > 0) return "CORRECTION_REQUIRED";
+  return "DIAGNOSTIC";
+}
+function decisionConstraint(phase: ForgeAgentPhase, recovery: ForgeValidationRecovery | null): ForgeAgentDecisionConstraint {
+  if (phase === "DIAGNOSTIC") return { phase, allowedDecisionTypes: ["TOOL_CALL"], allowedTools: ["list_files", "read_file"], instruction: recovery ? validationRecoveryInstruction(recovery) : "Inspecte uniquement les fichiers nécessaires." };
+  if (phase === "CORRECTION_REQUIRED") return { phase, allowedDecisionTypes: ["TOOL_CALL"], allowedTools: ["write_file", "delete_file"], instruction: recovery ? validationRecoveryInstruction(recovery) : "Applique une mutation corrective." };
+  if (phase === "REVALIDATION_REQUIRED") return { phase, allowedDecisionTypes: ["TOOL_CALL"], allowedTools: ["run_command"], instruction: recovery ? validationRecoveryInstruction(recovery) : "Relance la validation après mutation." };
+  return { phase, allowedDecisionTypes: ["PLAN", "TOOL_CALL", "FINAL", "FAIL"], allowedTools: ["list_files", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"], instruction: "Choisis la prochaine action utile selon les completion gates." };
+}
+function forcedPhaseDecision(phase: ForgeAgentPhase, recovery: ForgeValidationRecovery | null): ForgeAgentDecision | null {
+  if (phase !== "DIAGNOSTIC" || !recovery) return null;
+  const candidate = recovery.candidateFiles.find((path) => !recovery.filesReadSinceFailure.has(path) && !recovery.inspectionsSinceFailure.has(path));
+  return candidate ? { type: "TOOL_CALL", summary: "Diagnostic ciblé de la validation", tool: "read_file", input: { path: candidate } } : null;
+}
+async function decideForPhase(model: ForgeAgentModelProvider, context: ForgeAgentModelContext, phase: ForgeAgentPhase, recovery: ForgeValidationRecovery | null) {
+  const constraint = decisionConstraint(phase, recovery);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const decision = await model.decide(context, constraint);
+    if (isDecisionCompatible(decision, constraint, recovery)) return decision;
+  }
+  throw new ForgeAgentError("MODEL", `Le modèle Forge n'a produit aucune action compatible avec la phase ${phase}.`);
+}
+function isDecisionCompatible(decision: ForgeAgentDecision, constraint: ForgeAgentDecisionConstraint, recovery: ForgeValidationRecovery | null) {
+  if (!constraint.allowedDecisionTypes.includes(decision.type)) return false;
+  if (decision.type !== "TOOL_CALL") return true;
+  if (!constraint.allowedTools.includes(decision.tool)) return false;
+  if (constraint.phase !== "REVALIDATION_REQUIRED" || !recovery) return true;
+  try {
+    const safe = safeToolInput("run_command", decision.input);
+    return decision.input.validation === true
+      && safe.command === recovery.command
+      && JSON.stringify(safe.args) === JSON.stringify(recovery.args)
+      && safe.cwd === recovery.cwd;
+  } catch {
+    return false;
+  }
+}
 function startupRecoveryMessage(attempt: number, modelError?: string, lastRecoverableFailure?: string | null) {
   const reason = modelError ? `La terminaison demandée a été refusée: ${sanitizeAgentText(modelError, 500)} ` : "";
   const toolFailure = lastRecoverableFailure ? `Dernier échec récupérable: ${sanitizeAgentText(lastRecoverableFailure, 900)} ` : "";

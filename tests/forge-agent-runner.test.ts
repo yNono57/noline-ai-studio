@@ -10,8 +10,8 @@ const { deriveForgeConversationTitle } = require("../lib/forge/conversation-titl
 const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
 const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
-function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string>; missingFiles?: string[]; blockedFiles?: string[]; commandResults?: Array<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number }> } = {}) {
-  let run: Record<string, unknown> | null = null; let runCreates = 0; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
+function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>, constraint?: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string>; missingFiles?: string[]; blockedFiles?: string[]; commandResults?: Array<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number }> } = {}) {
+  let run: Record<string, unknown> | null = null; let runCreates = 0; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const constraints: Array<Record<string, unknown> | undefined> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { runCreates += 1; run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
@@ -20,9 +20,9 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
     runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed","scripts":{"build":"vite build"}}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
-    model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
+    model: { key: "mock", async decide(context: Record<string, unknown>, constraint?: Record<string, unknown>) { contexts.push(context); constraints.push(constraint); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context, constraint) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, commands, writes, reads, lists, contexts, files };
+  return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, commands, writes, reads, lists, contexts, constraints, files };
 }
 
 test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
@@ -186,7 +186,10 @@ test("repository minimal ECLYRA refuse FINAL d inspection puis implémente, corr
     { type: "FINAL", summary: "Application prête", report: "Application créée et build validé." },
     { type: "FINAL", summary: "Application prête", report: "Application créée, build réussi, Git status et Git diff réels vérifiés sans commit ni push." },
     { type: "FINAL", summary: "Application prête", report: "Application créée, build réussi, Git status et Git diff réels vérifiés sans commit ni push." },
-  ], false, { entries: [{ path: ".git", type: "directory", size: 0 }, { path: "README.md", type: "file", size: 20 }, { path: "hello-forge.txt", type: "file", size: 23 }], files: { "README.md": "# ECLYRA minimal", "hello-forge.txt": "Hello from NØLINE Forge" } });
+  ], false, { entries: [{ path: ".git", type: "directory", size: 0 }, { path: "README.md", type: "file", size: 20 }, { path: "hello-forge.txt", type: "file", size: 23 }], files: { "README.md": "# ECLYRA minimal", "hello-forge.txt": "Hello from NØLINE Forge" }, commandResults: [
+    { stdout: "", stderr: "src/App.tsx:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 8 },
+    { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 },
+  ] });
   const result = await target.runner.run("user-a", "conversation-a", objective);
   assert.equal(result.status, "COMPLETED");
   assert.deepEqual(target.lists, ["."]);
@@ -218,7 +221,10 @@ test("repository minimal traite un fichier optionnel absent comme information pu
     { type: "FINAL", summary: "Terminé", report: "Application créée et build réussi." },
     { type: "FINAL", summary: "Terminé", report: "Application créée, build réussi, Git status et Git diff vérifiés." },
     { type: "FINAL", summary: "Terminé", report: "Application créée, build réussi, Git status et Git diff vérifiés sans commit ni push." },
-  ], false, { entries: [{ path: ".git", type: "directory", size: 0 }, { path: "README.md", type: "file", size: 20 }, { path: "hello-forge.txt", type: "file", size: 23 }], files: { "README.md": "# Dépôt minimal", "hello-forge.txt": "Hello from NØLINE Forge" }, missingFiles: ["package.json"] });
+  ], false, { entries: [{ path: ".git", type: "directory", size: 0 }, { path: "README.md", type: "file", size: 20 }, { path: "hello-forge.txt", type: "file", size: 23 }], files: { "README.md": "# Dépôt minimal", "hello-forge.txt": "Hello from NØLINE Forge" }, missingFiles: ["package.json"], commandResults: [
+    { stdout: "", stderr: "src/main.ts:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 8 },
+    { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 },
+  ] });
   const result = await target.runner.run("user-a", "conversation-a", objective);
   assert.equal(result.status, "COMPLETED");
   assert.equal(target.reads.filter((path) => path === "package.json").length, 2);
@@ -283,7 +289,10 @@ test("mission complexe récupère un FAIL prématuré puis utilise réellement l
     { type: "TOOL_CALL", summary: "Vérifier Git status", tool: "git_status", input: {} },
     { type: "TOOL_CALL", summary: "Vérifier Git diff", tool: "git_diff", input: {} },
     { type: "FINAL", summary: "Application validée", report: "Repository inspecté, page React TypeScript créée, build validé et Git status/diff vérifiés sans commit ni push." },
-  ]);
+  ], false, { commandResults: [
+    { stdout: "", stderr: "src/App.tsx:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 8 },
+    { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 },
+  ] });
   const result = await target.runner.run("user-a", "conversation-a", objective);
   assert.equal(result.status, "COMPLETED");
   assert.deepEqual(target.lists, ["."]);
@@ -331,7 +340,10 @@ test("boucle agentique planifie, corrige une validation en échec puis termine",
     { type: "TOOL_CALL", summary: "Retester", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
     { type: "TOOL_CALL", summary: "Status", tool: "git_status", input: {} }, { type: "TOOL_CALL", summary: "Diff", tool: "git_diff", input: {} },
     { type: "FINAL", summary: "Fini", report: "Tests PASS, aucun commit ni push." },
-  ]);
+  ], false, { commandResults: [
+    { stdout: "", stderr: "src/index.ts:1:1 test failure", exitCode: 1, timedOut: false, truncated: false, durationMs: 8 },
+    { stdout: "tests pass", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 },
+  ] });
   const result = await target.runner.run("user-a", "conversation-a", "Corriger le testbed");
   assert.equal(result.status, "COMPLETED"); assert.equal(target.commands.length, 2); assert.equal(target.writes.length, 2); assert.equal(target.run()?.baseCommitSha, "a".repeat(40)); assert.equal(target.steps.find((step) => step.summary === "Tester")?.status, "FAILED"); assert.equal(target.steps.find((step) => step.summary === "Retester")?.status, "COMPLETED");
   assert.doesNotMatch(JSON.stringify(target.steps), /repository-secret-source|"content":"first"/);
@@ -504,15 +516,17 @@ test("budget Forge reste borné à 60 étapes, 48 outils et contraintes SQL alig
 });
 
 
-test("validation npm non nulle bloque le retry aveugle puis autorise le retry après correction", async () => {
+test("validation npm non nulle impose correction puis autorise la revalidation exacte", async () => {
   const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const premature = { type: "FINAL", summary: "Mission incomplète", report: "Je termine sans corriger." };
   const target = harness([
     { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
     { type: "TOOL_CALL", summary: "Créer application", tool: "write_file", input: { path: "src/App.tsx", content: "export default () => <main>draft</main>" } },
     build,
-    build,
-    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /COMMAND_RETRY_BLOCKED/); assert.match(history, /exitCode=1/); assert.match(history, /TypeScript error/); assert.match(history, /mutationRevision=1/); return { type: "TOOL_CALL", summary: "Lire source en erreur", tool: "read_file", input: { path: "src/App.tsx" } }; },
-    { type: "TOOL_CALL", summary: "Corriger application", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } },
+    premature,
+    { type: "FAIL", summary: "Abandon", error: "Mission incomplète." },
+    (_context: Record<string, unknown>, constraint?: Record<string, unknown>) => { assert.equal(constraint?.phase, "CORRECTION_REQUIRED"); assert.deepEqual(constraint?.allowedTools, ["write_file", "delete_file"]); return { type: "TOOL_CALL", summary: "Corriger application", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } }; },
+    premature,
     build,
     { type: "FINAL", summary: "Terminé", report: "Application corrigée et build réussi." },
     { type: "FINAL", summary: "Terminé", report: "Application corrigée, build réussi et Git status vérifié." },
@@ -527,18 +541,15 @@ test("validation npm non nulle bloque le retry aveugle puis autorise le retry ap
   const result = await target.runner.run("user-a", "conversation-a", "Inspecte puis crée l’application, lance le build, corrige les erreurs et vérifie Git status et Git diff.");
   assert.equal(result.status, "COMPLETED");
   assert.equal(target.commands.length, 2);
-  assert.match(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /npm run build exited 1/);
-  assert.doesNotMatch(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /TOOL ERROR|input invalide/i);
-  assert.match(String(target.steps.find((step) => step.summary === "Validation identique suspendue")?.resultSummary), /COMMAND_RETRY_BLOCKED/);
-  assert.equal(target.steps.filter((step) => step.summary === "Validation identique suspendue").length, 1);
   assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 0);
   assert.equal(target.steps.findLast((step) => step.summary === "Build")?.status, "COMPLETED");
+  assert.ok(target.constraints.some((constraint) => constraint?.phase === "CORRECTION_REQUIRED"));
+  assert.ok(target.constraints.some((constraint) => constraint?.phase === "REVALIDATION_REQUIRED"));
   assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
   assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
   assert.ok(target.steps.length < 60);
   assert.doesNotMatch(JSON.stringify(target.steps), /git_add|git_commit|git_push/);
 });
-
 test("script npm absent observé dans package.json ne déclenche aucun retry runtime aveugle", async () => {
   const lint = { type: "TOOL_CALL", summary: "Lint", tool: "run_command", input: { command: "npm", args: ["run", "lint"], cwd: ".", validation: true } };
   const target = harness([
@@ -561,15 +572,14 @@ test("script npm absent observé dans package.json ne déclenche aucun retry run
   assert.match(String(target.steps.find((step) => step.summary === "Validation identique suspendue")?.resultSummary), /COMMAND_RETRY_BLOCKED/);
 });
 
-test("quatre retries npm identiques sans mutation restent stoppés rapidement", async () => {
+test("répétition de validation incompatible est stoppée sans nouvel appel runtime", async () => {
   const build = { type: "TOOL_CALL", summary: "Build répété", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
   const target = harness(Array.from({ length: 6 }, () => build), false, { commandResults: [{ stdout: "", stderr: "build error", exitCode: 1, timedOut: false, truncated: false, durationMs: 6 }] });
-  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Lance le build et corrige les erreurs."), /répète une validation en échec sans corriger/);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Lance le build et corrige les erreurs."), /aucune action compatible avec la phase DIAGNOSTIC/);
   assert.equal(target.commands.length, 1);
-  assert.equal(target.steps.filter((step) => step.summary === "Validation identique suspendue").length, 4);
+  assert.equal(target.steps.filter((step) => step.tool === "run_command").length, 1);
   assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
 });
-
 test("run_command invalide conserve un recovery de protocole précis", async () => {
   const target = harness([
     { type: "TOOL_CALL", summary: "Commande invalide", tool: "run_command", input: { command: "npm run build && npm test", args: [], cwd: ".", validation: true } },
@@ -582,22 +592,19 @@ test("run_command invalide conserve un recovery de protocole précis", async () 
   assert.equal(target.commands.length, 1);
 });
 
-test("trace Production: validation échouée progresse par inspection, correction et revalidation", async () => {
+test("trace Production: les phases imposent diagnostic, correction et revalidation", async () => {
   const prematureFail = { type: "FAIL", summary: "Mission incomplète", error: "Impossible de poursuivre sans correction." };
   const prematureFinal = { type: "FINAL", summary: "Terminé", report: "Inspection terminée mais aucune correction disponible." };
   const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
   const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Git status prématuré", tool: "git_status", input: {} },
     build,
     prematureFail,
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: DIAGNOSTIC/); return { type: "TOOL_CALL", summary: "Inspecter racine", tool: "list_files", input: { path: "." } }; },
     prematureFinal,
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /src\/App\.tsx/); return { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } }; },
+    (_context: Record<string, unknown>, constraint?: Record<string, unknown>) => { assert.equal(constraint?.phase, "CORRECTION_REQUIRED"); assert.deepEqual(constraint?.allowedDecisionTypes, ["TOOL_CALL"]); assert.deepEqual(constraint?.allowedTools, ["write_file", "delete_file"]); return { type: "TOOL_CALL", summary: "Corriger source", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } }; },
     prematureFail,
-    (context: Record<string, unknown>) => { const history=JSON.stringify(context); assert.match(history, /src\/App\.tsx/); return { type: "TOOL_CALL", summary: "Lire source responsable", tool: "read_file", input: { path: "src/App.tsx" } }; },
-    prematureFinal,
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: CORRECTION/); return { type: "TOOL_CALL", summary: "Corriger source", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } }; },
-    prematureFail,
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: REVALIDATION/); return build; },
+    (_context: Record<string, unknown>, constraint?: Record<string, unknown>) => { assert.equal(constraint?.phase, "REVALIDATION_REQUIRED"); assert.deepEqual(constraint?.allowedTools, ["run_command"]); return build; },
     { type: "FINAL", summary: "Terminé", report: "Correction appliquée et build réussi." },
     { type: "FINAL", summary: "Terminé", report: "Correction, build et Git status vérifiés." },
     { type: "FINAL", summary: "Terminé", report: "Correction, build, Git status et Git diff vérifiés sans commit ni push." },
@@ -612,26 +619,26 @@ test("trace Production: validation échouée progresse par inspection, correctio
   const result = await target.runner.run("user-a", "conversation-a", "Corrige l'application, lance le build puis vérifie Git status et Git diff.");
   assert.equal(result.status, "COMPLETED");
   assert.equal(target.commands.length, 2);
-  assert.deepEqual(target.lists, ["."]);
-  assert.deepEqual(target.reads.filter((path) => path === "package.json" || path === "src/App.tsx"), ["package.json", "src/App.tsx", "src/App.tsx"]);
+  assert.deepEqual(target.reads, ["package.json", "src/App.tsx", "src/App.tsx"]);
   assert.equal(target.files.get("src/App.tsx"), "export default function App() { return <main>ready</main>; }");
   assert.equal(target.steps.findLast((step) => step.summary === "Build")?.status, "COMPLETED");
-  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status" && step.summary !== "Git status prématuré")?.status, "COMPLETED");
   assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
-  assert.ok(target.steps.filter((step) => step.summary === "Mission incomplète").length >= 4);
-  assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 0);
+  assert.ok(target.steps.length < 30);
+  assert.ok(target.commands.length + target.reads.length + target.writes.length < 20);
   assert.doesNotMatch(JSON.stringify(target.steps), /git_add|git_commit|git_push/);
 });
-
-test("vrai anti-loop arrête trois terminaisons sans progression après validation échouée", async () => {
+test("vrai anti-loop refuse trois terminaisons incompatibles sans consommer de steps", async () => {
   const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
   const refusal = { type: "FAIL", summary: "Refus", error: "Je ne corrige pas le projet." };
   const target = harness([build, refusal, refusal, refusal, refusal], false, {
     commandResults: [{ stdout: "", stderr: "src/App.tsx:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 5 }],
   });
-  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Corrige l'application et lance le build."), /refuse de progresser dans la récupération requise/);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Corrige l'application et lance le build."), /aucune action compatible avec la phase CORRECTION_REQUIRED/);
   assert.equal(target.commands.length, 1);
-  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 3);
-  assert.ok(target.steps.length < 10);
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 0);
+  assert.equal(target.steps.length, 3);
+  assert.equal(target.constraints.filter((constraint) => constraint?.phase === "CORRECTION_REQUIRED").length, 3);
   assert.ok(target.commands.length < FORGE_AGENT_LIMITS.maxToolCalls);
 });
