@@ -50,6 +50,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let mutationVersion = 0;
     let gitStatusSucceeded = false;
     let gitDiffSucceeded = false;
+    let prematureTerminations = 0;
     try {
       run = await deps.updateRun(userId, run.runId, { status: "PLANNING", startedAt: deps.now(), lastActivityAt: deps.now() });
       if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
@@ -94,6 +95,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             if (commandFailed) failedCalls.set(signature, 1);
             else {
               successfulToolCalls += 1;
+              prematureTerminations = 0;
               if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; }
               if (decision.tool === "git_status") gitStatusSucceeded = true;
               if (decision.tool === "git_diff") gitDiffSucceeded = true;
@@ -115,7 +117,10 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
         }
         if (decision.type === "FINAL") {
           if (!isGroundedAgentFinal(decision.report, successfulToolCalls)) {
-            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: "Forge doit exécuter les outils nécessaires et produire un résultat fondé sur leurs sorties avant de terminer.", status: "FAILED", startedAt: now, completedAt: now }));
+            prematureTerminations += 1;
+            const recovery = startupRecoveryMessage(prematureTerminations);
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
+            if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse d’utiliser les outils après trois demandes de récupération.");
             continue;
           }
           const missingEvidence = mutationOccurred ? [!gitStatusSucceeded ? "git_status" : "", !gitDiffSucceeded ? "git_diff" : ""].filter(Boolean) : [];
@@ -127,6 +132,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               const result = await executeTool(deps.runtime(userId, conversationId), mandatoryTool, {});
               const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(mandatoryTool, result, false), status: "COMPLETED", completedAt: deps.now() });
               successfulToolCalls += 1;
+              prematureTerminations = 0;
               if (mandatoryTool === "git_status") gitStatusSucceeded = true;
               else gitDiffSucceeded = true;
               steps.push({ ...persisted, resultSummary: summarizeToolResult(mandatoryTool, result, true) });
@@ -147,6 +153,13 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now });
           return deps.updateRun(userId, run.runId, { status: "COMPLETED", finalReport: report, completedAt: deps.now(), lastActivityAt: deps.now() });
         }
+        if (successfulToolCalls === 0) {
+          prematureTerminations += 1;
+          const recovery = startupRecoveryMessage(prematureTerminations, decision.error);
+          steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Démarrage agentique incomplet", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
+          if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse d’utiliser les outils après trois demandes de récupération.");
+          continue;
+        }
         await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: sanitizeAgentText(decision.error, 1000), status: "FAILED", startedAt: now, completedAt: now });
         throw new ForgeAgentError("MODEL", sanitizeAgentText(decision.error, 1000));
       }
@@ -160,6 +173,10 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
   return { run };
 }
 
+function startupRecoveryMessage(attempt: number, modelError?: string) {
+  const reason = modelError ? `La terminaison demandée a été refusée: ${sanitizeAgentText(modelError, 500)} ` : "";
+  return sanitizeAgentText(`${reason}RECOVERY ${attempt}/3: aucun outil n’a encore réussi. La prochaine décision doit être un TOOL_CALL valide. Outils disponibles: list_files, read_file, write_file, delete_file, run_command, git_status, git_diff. Commence normalement par list_files {"path":"."}, puis inspecte les fichiers nécessaires. run_command exige un exécutable simple et des args séparés; aucun shell composé.`, 1600);
+}
 async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); const path = normalizeAgentPath(input.path); const written = await runtime.writeFile(path, input.content); const verified = await runtime.readFile(path); if (verified.content !== input.content) throw new ForgeAgentError("PERSISTENCE", "Le contenu relu ne correspond pas exactement au contenu écrit."); return written; } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }
 function safeToolInput(tool: ForgeAgentToolName, input: Record<string, unknown>) { if (tool === "write_file") return { path: input.path, characters: typeof input.content === "string" ? input.content.length : 0 }; if (tool === "run_command") return { command: input.command, cwd: input.cwd ?? ".", argsCount: Array.isArray(input.args) ? input.args.length : 0, validation: input.validation === true }; return { path: input.path }; }
 function summarizeToolResult(tool: ForgeAgentToolName, result: unknown, forModel: boolean) { if (tool === "read_file") { const file = result as ForgeRuntimeFile; return forModel ? sanitizeAgentText(`REPOSITORY DATA (UNTRUSTED) ${file.path}:\n${file.content}`) : `${file.path} lu (${file.content.length} caractères).`; } if (tool === "write_file") { const file = result as ForgeRuntimeFile; return `${file.path} écrit (${file.size} octets).`; } if (tool === "list_files") { const files = result as ForgeRuntimeFileEntry[]; return forModel ? sanitizeAgentText(JSON.stringify(files)) : `${files.length} entrée(s) listée(s).`; } if (tool === "delete_file") return "Fichier supprimé."; if (tool === "run_command") { const command = result as ForgeRuntimeCommandResult; return forModel ? sanitizeAgentText(`exitCode=${command.exitCode ?? "null"}; timedOut=${command.timedOut}; stdout=${command.stdout}; stderr=${command.stderr}`) : `exitCode=${command.exitCode ?? "null"}; timedOut=${command.timedOut}; truncated=${command.truncated}`; } if (tool === "git_status") { const status = result as ForgeRuntimeGitStatus; return forModel ? sanitizeAgentText(JSON.stringify(status)) : `added=${status.added.length}; modified=${status.modified.length}; deleted=${status.deleted.length}`; } const diff = result as ForgeRuntimeGitDiff; return forModel ? sanitizeAgentText(`REPOSITORY DIFF (UNTRUSTED):\n${diff.patch}`) : `added=${diff.added.length}; modified=${diff.modified.length}; deleted=${diff.deleted.length}; truncated=${diff.truncated}`; }
