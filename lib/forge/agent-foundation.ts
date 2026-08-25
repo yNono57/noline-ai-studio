@@ -8,7 +8,7 @@ export type ForgeAgentRun = { runId: string; userId: string; projectId: string; 
 export type ForgeAgentRunView = Omit<ForgeAgentRun, "userId">;
 export type ForgeAgentStep = { stepId: string; runId: string; stepNumber: number; type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: "RUNNING" | "COMPLETED" | "FAILED"; startedAt: string; completedAt: string | null };
 export type ForgeAgentDecision = { type: "PLAN"; summary: string; plan: string[] } | { type: "TOOL_CALL"; summary: string; tool: ForgeAgentToolName; input: Record<string, unknown> } | { type: "FINAL"; summary: string; report: string } | { type: "FAIL"; summary: string; error: string };
-export type ForgeAgentModelContext = { objective: string; repository: string; branch: string; baseCommitSha: string; status: ForgeAgentRunStatus; steps: Array<{ type: ForgeAgentStepType; summary: string; resultSummary: string | null }> };
+export type ForgeAgentModelContext = { objective: string; repository: string; branch: string; baseCommitSha: string; status: ForgeAgentRunStatus; steps: Array<{ type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: ForgeAgentStep["status"] }> };
 export interface ForgeAgentModelProvider { readonly key: string; decide(context: ForgeAgentModelContext): Promise<ForgeAgentDecision>; }
 export interface ForgeAgentRuntimeAdapter { listFiles(path: string): Promise<ForgeRuntimeFileEntry[]>; readFile(path: string): Promise<ForgeRuntimeFile>; writeFile(path: string, content: string): Promise<ForgeRuntimeFile>; deleteFile(path: string): Promise<void>; executeCommand(command: Partial<ForgeRuntimeCommand>): Promise<ForgeRuntimeCommandResult>; getGitStatus(): Promise<ForgeRuntimeGitStatus>; getGitDiff(): Promise<ForgeRuntimeGitDiff>; }
 export class ForgeAgentError extends Error { constructor(readonly code: "UNAUTHENTICATED" | "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT" | "LIMIT" | "CANCELLED" | "MODEL" | "PERSISTENCE", message: string) { super(message); this.name = "ForgeAgentError"; } }
@@ -37,40 +37,114 @@ export function createInitialAgentPlan(_objective: string) {
 export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
   async function run(userId: string, conversationId: string, objectiveInput: unknown) {
     if (!userId.trim()) throw new ForgeAgentError("UNAUTHENTICATED", "Authentification requise.");
-    const objective = sanitizeAgentText(normalizeAgentObjective(objectiveInput), FORGE_AGENT_LIMITS.maxObjectiveCharacters), context = await deps.resolveContext(userId, conversationId), started = Date.now();
+    const objective = sanitizeAgentText(normalizeAgentObjective(objectiveInput), FORGE_AGENT_LIMITS.maxObjectiveCharacters);
+    const context = await deps.resolveContext(userId, conversationId);
+    const started = Date.now();
     let run = await deps.createRun({ userId, projectId: context.projectId, conversationId, workspaceId: context.workspaceId, runtimeId: context.runtimeId, status: "QUEUED", objective, baseCommitSha: context.baseCommitSha, plan: [], finalReport: null, startedAt: null, completedAt: null, lastActivityAt: null, error: null });
-    const steps: ForgeAgentStep[] = []; let toolCalls = 0, successfulToolCalls = 0, validationFailed = false;
+    const steps: ForgeAgentStep[] = [];
+    const failedCalls = new Map<string, number>();
+    let toolCalls = 0;
+    let successfulToolCalls = 0;
+    let validationFailed = false;
+    let mutationOccurred = false;
+    let mutationVersion = 0;
+    let gitStatusSucceeded = false;
+    let gitDiffSucceeded = false;
     try {
       run = await deps.updateRun(userId, run.runId, { status: "PLANNING", startedAt: deps.now(), lastActivityAt: deps.now() });
       if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
-      const initialPlan = createInitialAgentPlan(objective), planTime = deps.now();
+      const initialPlan = createInitialAgentPlan(objective);
+      const planTime = deps.now();
       steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: 1, type: "PLAN", summary: "Plan initial Forge", tool: null, input: {}, resultSummary: initialPlan.join("\n"), status: "COMPLETED", startedAt: planTime, completedAt: planTime }));
       run = await deps.updateRun(userId, run.runId, { status: "RUNNING", plan: initialPlan, lastActivityAt: planTime });
       for (let number = 2; number <= FORGE_AGENT_LIMITS.maxSteps; number += 1) {
         if (Date.now() - started > FORGE_AGENT_LIMITS.maxRuntimeSeconds * 1000) throw new ForgeAgentError("LIMIT", "Durée maximale du run atteinte.");
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
-        const decision = await deps.model.decide({ objective, repository: context.repository, branch: context.branch, baseCommitSha: context.baseCommitSha, status: run.status, steps: steps.slice(-12).map(({ type, summary, resultSummary }) => ({ type, summary, resultSummary: resultSummary?.slice(0, 8_000) || null })) });
+        const decision = await deps.model.decide({
+          objective, repository: context.repository, branch: context.branch, baseCommitSha: context.baseCommitSha, status: run.status,
+          steps: steps.slice(-12).map(({ type, summary, tool, input, resultSummary, status }) => ({ type, summary, tool, input, resultSummary: resultSummary?.slice(0, 8_000) || null, status })),
+        });
         if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
         const now = deps.now();
-        if (decision.type === "PLAN") { const plan = decision.plan.slice(0, 8).map((item) => sanitizeAgentText(item, 500)); steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "PLAN", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: plan.join("\n"), status: "COMPLETED", startedAt: now, completedAt: now })); run = await deps.updateRun(userId, run.runId, { status: "RUNNING", plan, lastActivityAt: now }); continue; }
-        if (decision.type === "TOOL_CALL") {
-          if (++toolCalls > FORGE_AGENT_LIMITS.maxToolCalls) throw new ForgeAgentError("LIMIT", "Nombre maximal d’outils atteint.");
-          const executing = await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: sanitizeAgentText(decision.summary, 1000), tool: decision.tool, input: safeToolInput(decision.tool, decision.input), resultSummary: null, status: "RUNNING", startedAt: now, completedAt: null });
-          try { const result = await executeTool(deps.runtime(userId, conversationId), decision.tool, decision.input); const validation = decision.tool === "run_command" && decision.input.validation === true; const commandFailed = decision.tool === "run_command" && ((result as ForgeRuntimeCommandResult).timedOut || (result as ForgeRuntimeCommandResult).exitCode !== 0); if (commandFailed) validationFailed = true; else if (validation) validationFailed = false; const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(decision.tool, result, false), status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() }); if (!commandFailed) successfulToolCalls += 1; steps.push({ ...persisted, resultSummary: summarizeToolResult(decision.tool, result, true) }); if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé."); run = await deps.updateRun(userId, run.runId, { status: validation ? "VALIDATING" : "RUNNING", lastActivityAt: deps.now() }); }
-          catch (error) { if (error instanceof ForgeAgentError && error.code === "CANCELLED") throw error; validationFailed = true; steps.push(await deps.updateStep(userId, executing.stepId, { resultSummary: sanitizeAgentText(error instanceof Error ? error.message : "Outil en échec."), status: "FAILED", completedAt: deps.now() })); run = await deps.updateRun(userId, run.runId, { status: "RUNNING", lastActivityAt: deps.now() }); }
+        if (decision.type === "PLAN") {
+          const plan = decision.plan.slice(0, 8).map((item) => sanitizeAgentText(item, 500));
+          steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "PLAN", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: plan.join("\n"), status: "COMPLETED", startedAt: now, completedAt: now }));
+          run = await deps.updateRun(userId, run.runId, { status: "RUNNING", plan, lastActivityAt: now });
           continue;
         }
-        if (decision.type === "FINAL") { if (!isGroundedAgentFinal(decision.report, successfulToolCalls)) { steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: "Forge doit exécuter les outils nécessaires et produire un résultat fondé sur leurs sorties avant de terminer.", status: "FAILED", startedAt: now, completedAt: now })); continue; } if (validationFailed) { steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Validation encore en échec", tool: null, input: {}, resultSummary: "Une validation explicitement demandée doit repasser avant la fin.", status: "FAILED", startedAt: now, completedAt: now })); continue; } const report = sanitizeAgentText(decision.report, 20_000); await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now }); return deps.updateRun(userId, run.runId, { status: "COMPLETED", finalReport: report, completedAt: deps.now(), lastActivityAt: deps.now() }); }
+        if (decision.type === "TOOL_CALL") {
+          if (++toolCalls > FORGE_AGENT_LIMITS.maxToolCalls) throw new ForgeAgentError("LIMIT", "Nombre maximal d’outils atteint.");
+          const safeInput = safeToolInput(decision.tool, decision.input);
+          const signature = `${mutationVersion}:${decision.tool}:${JSON.stringify(decision.input)}`;
+          const previousFailures = failedCalls.get(signature) || 0;
+          if (previousFailures >= 2) throw new ForgeAgentError("MODEL", "Le modèle Forge répète un appel d’outil invalide sans le corriger.");
+          if (previousFailures === 1) {
+            const duplicateMessage = "Appel identique déjà refusé. Corrige le schéma de l’outil; pour Git utilise git_status puis git_diff, sans shell composé.";
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: sanitizeAgentText(decision.summary, 1000), tool: decision.tool, input: safeInput, resultSummary: duplicateMessage, status: "FAILED", startedAt: now, completedAt: now }));
+            failedCalls.set(signature, 2);
+            continue;
+          }
+          const executing = await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: sanitizeAgentText(decision.summary, 1000), tool: decision.tool, input: safeInput, resultSummary: null, status: "RUNNING", startedAt: now, completedAt: null });
+          const validation = decision.tool === "run_command" && decision.input.validation === true;
+          try {
+            const result = await executeTool(deps.runtime(userId, conversationId), decision.tool, decision.input);
+            const commandFailed = decision.tool === "run_command" && ((result as ForgeRuntimeCommandResult).timedOut || (result as ForgeRuntimeCommandResult).exitCode !== 0);
+            if (validation) validationFailed = commandFailed;
+            const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(decision.tool, result, false), status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() });
+            if (commandFailed) failedCalls.set(signature, 1);
+            else {
+              successfulToolCalls += 1;
+              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; }
+              if (decision.tool === "git_status") gitStatusSucceeded = true;
+              if (decision.tool === "git_diff") gitDiffSucceeded = true;
+            }
+            steps.push({ ...persisted, resultSummary: summarizeToolResult(decision.tool, result, true) });
+            if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
+            run = await deps.updateRun(userId, run.runId, { status: validation ? "VALIDATING" : "RUNNING", lastActivityAt: deps.now() });
+          } catch (error) {
+            if (error instanceof ForgeAgentError && error.code === "CANCELLED") throw error;
+            if (validation) validationFailed = true;
+            failedCalls.set(signature, 1);
+            const reason = sanitizeAgentText(error instanceof Error ? error.message : "Outil en échec.", 1000);
+            const actionable = sanitizeAgentText(`TOOL ERROR: ${reason} Corrige l’entrée et choisis l’outil dédié; git_status/git_diff n’acceptent pas de commande shell.`, 1400);
+            const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: actionable, status: "FAILED", completedAt: deps.now() });
+            steps.push({ ...failed, resultSummary: actionable });
+            run = await deps.updateRun(userId, run.runId, { status: "RUNNING", lastActivityAt: deps.now() });
+          }
+          continue;
+        }
+        if (decision.type === "FINAL") {
+          if (!isGroundedAgentFinal(decision.report, successfulToolCalls)) {
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: "Forge doit exécuter les outils nécessaires et produire un résultat fondé sur leurs sorties avant de terminer.", status: "FAILED", startedAt: now, completedAt: now }));
+            continue;
+          }
+          const missingEvidence = mutationOccurred ? [!gitStatusSucceeded ? "git_status" : "", !gitDiffSucceeded ? "git_diff" : ""].filter(Boolean) : [];
+          if (missingEvidence.length) {
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Vérifications Git manquantes", tool: null, input: {}, resultSummary: `Exécute les outils dédiés suivants avant FINAL : ${missingEvidence.join(", ")}.`, status: "FAILED", startedAt: now, completedAt: now }));
+            continue;
+          }
+          if (validationFailed) {
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Validation encore en échec", tool: null, input: {}, resultSummary: "Une validation explicitement demandée doit repasser avant la fin.", status: "FAILED", startedAt: now, completedAt: now }));
+            continue;
+          }
+          const report = sanitizeAgentText(decision.report, 20_000);
+          await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now });
+          return deps.updateRun(userId, run.runId, { status: "COMPLETED", finalReport: report, completedAt: deps.now(), lastActivityAt: deps.now() });
+        }
         await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: sanitizeAgentText(decision.error, 1000), status: "FAILED", startedAt: now, completedAt: now });
         throw new ForgeAgentError("MODEL", sanitizeAgentText(decision.error, 1000));
       }
       throw new ForgeAgentError("LIMIT", "Nombre maximal d’étapes atteint.");
-    } catch (error) { const cancelled = error instanceof ForgeAgentError && error.code === "CANCELLED"; await deps.updateRun(userId, run.runId, { status: cancelled ? "CANCELLED" : "FAILED", error: sanitizeAgentText(error instanceof Error ? error.message : "Run Forge en échec.", 1000), completedAt: deps.now(), lastActivityAt: deps.now() }); throw error; }
+    } catch (error) {
+      const cancelled = error instanceof ForgeAgentError && error.code === "CANCELLED";
+      await deps.updateRun(userId, run.runId, { status: cancelled ? "CANCELLED" : "FAILED", error: sanitizeAgentText(error instanceof Error ? error.message : "Run Forge en échec.", 1000), completedAt: deps.now(), lastActivityAt: deps.now() });
+      throw error;
+    }
   }
   return { run };
 }
 
-async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); return runtime.writeFile(normalizeAgentPath(input.path), input.content); } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }
+async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); const path = normalizeAgentPath(input.path); const written = await runtime.writeFile(path, input.content); const verified = await runtime.readFile(path); if (verified.content !== input.content) throw new ForgeAgentError("PERSISTENCE", "Le contenu relu ne correspond pas exactement au contenu écrit."); return written; } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }
 function safeToolInput(tool: ForgeAgentToolName, input: Record<string, unknown>) { if (tool === "write_file") return { path: input.path, characters: typeof input.content === "string" ? input.content.length : 0 }; if (tool === "run_command") return { command: input.command, cwd: input.cwd ?? ".", argsCount: Array.isArray(input.args) ? input.args.length : 0, validation: input.validation === true }; return { path: input.path }; }
 function summarizeToolResult(tool: ForgeAgentToolName, result: unknown, forModel: boolean) { if (tool === "read_file") { const file = result as ForgeRuntimeFile; return forModel ? sanitizeAgentText(`REPOSITORY DATA (UNTRUSTED) ${file.path}:\n${file.content}`) : `${file.path} lu (${file.content.length} caractères).`; } if (tool === "write_file") { const file = result as ForgeRuntimeFile; return `${file.path} écrit (${file.size} octets).`; } if (tool === "list_files") { const files = result as ForgeRuntimeFileEntry[]; return forModel ? sanitizeAgentText(JSON.stringify(files)) : `${files.length} entrée(s) listée(s).`; } if (tool === "delete_file") return "Fichier supprimé."; if (tool === "run_command") { const command = result as ForgeRuntimeCommandResult; return forModel ? sanitizeAgentText(`exitCode=${command.exitCode ?? "null"}; timedOut=${command.timedOut}; stdout=${command.stdout}; stderr=${command.stderr}`) : `exitCode=${command.exitCode ?? "null"}; timedOut=${command.timedOut}; truncated=${command.truncated}`; } if (tool === "git_status") { const status = result as ForgeRuntimeGitStatus; return forModel ? sanitizeAgentText(JSON.stringify(status)) : `added=${status.added.length}; modified=${status.modified.length}; deleted=${status.deleted.length}`; } const diff = result as ForgeRuntimeGitDiff; return forModel ? sanitizeAgentText(`REPOSITORY DIFF (UNTRUSTED):\n${diff.patch}`) : `added=${diff.added.length}; modified=${diff.modified.length}; deleted=${diff.deleted.length}; truncated=${diff.truncated}`; }
 

@@ -10,7 +10,7 @@ const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.t
 const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
 function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false) {
-  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; let commandIndex = 0;
+  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(); let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
@@ -18,10 +18,10 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles(path: string) { lists.push(path); return [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); const content = path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'; return { path, size: content.length, content }; }, async writeFile(path: string) { writes.push(path); return { path, size: 10, content: "changed" }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/index.ts"], deleted: [], patch: "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles(path: string) { lists.push(path); return [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, lists, contexts };
+  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, lists, contexts, files };
 }
 
 test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
@@ -94,10 +94,46 @@ test("mission Production démarre par un PLAN serveur puis lit réellement packa
   assert.equal(result.status, "COMPLETED"); assert.equal(target.steps[0]?.type, "PLAN"); assert.equal(target.steps[0]?.status, "COMPLETED"); assert.deepEqual(target.reads, ["package.json"]); assert.equal(target.run()?.objective, "Inspecte package.json et indique le nom du projet."); assert.match(String(target.run()?.finalReport), /noline-forge-testbed/); assert.doesNotMatch(String(target.run()?.finalReport), /pas accès|fournir.*package\.json/i);
 });
 test("composeur Agent écrit dans Daytona puis contrôle git status sans commit ni push", async () => {
-  const target = harness([{ type: "PLAN", summary: "Créer", plan: ["Écrire le fichier", "Vérifier Git"] }, { type: "TOOL_CALL", summary: "Créer hello", tool: "write_file", input: { path: "hello-forge.txt", content: "hello" } }, { type: "TOOL_CALL", summary: "Vérifier Git", tool: "git_status", input: {} }, { type: "FINAL", summary: "Terminé", report: "hello-forge.txt créé dans le sandbox." }]);
+  const target = harness([{ type: "PLAN", summary: "Créer", plan: ["Écrire le fichier", "Vérifier Git"] }, { type: "TOOL_CALL", summary: "Créer hello", tool: "write_file", input: { path: "hello-forge.txt", content: "hello" } }, { type: "TOOL_CALL", summary: "Vérifier Git", tool: "git_status", input: {} }, { type: "TOOL_CALL", summary: "Lire le diff", tool: "git_diff", input: {} }, { type: "FINAL", summary: "Terminé", report: "hello-forge.txt créé dans le sandbox. Git status et Git diff vérifiés." }]);
   const result = await submitForgeComposer("agent", "Crée hello-forge.txt contenant hello", { chat: async () => { throw new Error("chat classique appelé"); }, agent: (objective: string) => target.runner.run("user-a", "conversation-a", objective) });
   assert.equal(result.status, "COMPLETED"); assert.deepEqual(target.writes, ["hello-forge.txt"]); assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED"); assert.doesNotMatch(JSON.stringify(target.steps), /git_commit|git_push/);
 });
+test("mission hello-forge vérifie écriture exacte, Git status, Git diff et FINAL réel", async () => {
+  const objective = "Crée un fichier hello-forge.txt contenant exactement :\n\nHello from NØLINE Forge\n\nPuis vérifie Git status et Git diff. Ne crée aucun commit et ne push rien.";
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Créer le fichier", tool: "write_file", input: { path: "hello-forge.txt", content: "Hello from NØLINE Forge" } },
+    (context: Record<string, unknown>) => { assert.equal(target.files.get("hello-forge.txt"), "Hello from NØLINE Forge"); assert.match(JSON.stringify(context), /hello-forge\.txt écrit/); return { type: "TOOL_CALL", summary: "Vérifier Git status", tool: "git_status", input: {} }; },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /hello-forge\.txt/); return { type: "TOOL_CALL", summary: "Vérifier Git diff", tool: "git_diff", input: {} }; },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /Hello from NØLINE Forge/); return { type: "FINAL", summary: "Mission terminée", report: "hello-forge.txt contient exactement Hello from NØLINE Forge. Git status signale le fichier ajouté et Git diff confirme son contenu. Aucun commit ni push." }; },
+  ]);
+  const result = await target.runner.run("user-a", "conversation-a", objective);
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.steps[0]?.type, "PLAN");
+  assert.deepEqual(target.steps.filter((step) => step.type === "TOOL_CALL").map((step) => step.tool), ["write_file", "git_status", "git_diff"]);
+  assert.equal(target.files.get("hello-forge.txt"), "Hello from NØLINE Forge");
+  assert.ok(target.reads.includes("hello-forge.txt"));
+  assert.equal(target.steps.find((step) => step.tool === "write_file")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.match(String(target.run()?.finalReport), /Git status.*Git diff/i);
+  assert.doesNotMatch(JSON.stringify(target.steps), /git_commit|git_push/);
+});
+
+test("appel shell Git invalide reçoit une erreur structurée et ne boucle pas", async () => {
+  const invalid = { type: "TOOL_CALL", summary: "Git combiné", tool: "run_command", input: { command: "git status --short && printf '\\n---DIFF---\\n' && git diff -- hello-forge.txt", args: [], cwd: "." } };
+  const target = harness([
+    invalid,
+    invalid,
+    (context: Record<string, unknown>) => { const serialized = JSON.stringify(context); assert.match(serialized, /run_command/); assert.match(serialized, /Appel identique déjà refusé|TOOL ERROR/); return { type: "TOOL_CALL", summary: "Git status dédié", tool: "git_status", input: {} }; },
+    { type: "FINAL", summary: "Status vérifié", report: "Git status exécuté avec l’outil dédié." },
+  ]);
+  const result = await target.runner.run("user-a", "conversation-a", "Vérifie Git status");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands.length, 0);
+  assert.equal(target.steps.filter((step) => step.summary === "Git combiné").length, 2);
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+});
+
 test("boucle agentique planifie, corrige une validation en échec puis termine", async () => {
   const target = harness([
     { type: "PLAN", summary: "Plan", plan: ["Inspecter", "Modifier", "Tester"] },

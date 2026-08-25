@@ -1,4 +1,5 @@
 import type { ForgeRuntimeGitDiff, ForgeRuntimeStatus } from "./runtime-foundation";
+import type { ForgeMessage } from "./forge-store";
 
 export function summarizeForgeDiff(diff: ForgeRuntimeGitDiff) {
   const additions = diff.patch.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
@@ -15,4 +16,10 @@ export function getForgeAgentActivityState(status: string) {
   if (active) return { active: true, label: "Forge travaille…" };
   if (status === "COMPLETED") return { active: false, label: "Mission terminée" };
   return { active: false, label: "Forge n’a pas pu terminer la mission" };
+}
+
+export function shouldRenderPendingAgentMission(messages: ForgeMessage[], pending: { content: string; createdAt: string } | null) {
+  if (!pending) return false;
+  const pendingAt = Date.parse(pending.createdAt);
+  return !messages.some((message) => message.role === "USER" && message.content === pending.content && message.metadata?.forge_agent_mission === true && Date.parse(message.created_at) >= pendingAt - 5_000);
 }

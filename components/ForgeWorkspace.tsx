@@ -9,7 +9,7 @@ import { ForgeWorkspaceControl } from "@/components/ForgeWorkspaceControl";
 import { ForgeWorkspaceDrawer } from "@/components/ForgeWorkspaceDrawer";
 import { ForgeGitDiffPanel } from "@/components/ForgeGitDiffPanel";
 import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
-import { getForgeAgentActivityState, getForgeRuntimeBadge, summarizeForgeDiff } from "@/lib/forge/forge-ui";
+import { getForgeAgentActivityState, getForgeRuntimeBadge, shouldRenderPendingAgentMission, summarizeForgeDiff } from "@/lib/forge/forge-ui";
 import { submitForgeComposer, type ForgeComposerMode } from "@/lib/forge/forge-submit";
 import { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore, type ForgeSessionRestore } from "@/lib/forge/session-restore";
 import { isForgeChatNearBottom, scrollForgeChatToLatest } from "@/lib/forge/chat-scroll";
@@ -237,7 +237,7 @@ export function ForgeWorkspace() {
   const project = projects.find((item) => item.id === projectId);
   const conversation = conversations.find((item) => item.id === conversationId);
   const timeline: Array<{ key: string; at: string; kind: "message"; message: ForgeMessage } | { key: string; at: string; kind: "agent"; payload: ForgeAgentRunPayload }> = messages.map((message) => ({ key: message.id, at: message.created_at, kind: "message", message }));
-  if (pendingAgentMission) timeline.push({ key: pendingAgentMission.id, at: pendingAgentMission.createdAt, kind: "message", message: { id: pendingAgentMission.id, conversation_id: conversationId, role: "USER", content: pendingAgentMission.content, metadata: { pending: true, forge_agent_mission: true }, created_at: pendingAgentMission.createdAt } });
+  if (pendingAgentMission && shouldRenderPendingAgentMission(messages, pendingAgentMission)) timeline.push({ key: pendingAgentMission.id, at: pendingAgentMission.createdAt, kind: "message", message: { id: pendingAgentMission.id, conversation_id: conversationId, role: "USER", content: pendingAgentMission.content, metadata: { pending: true, forge_agent_mission: true }, created_at: pendingAgentMission.createdAt } });
   if (agentPayload) timeline.push({ key: `agent-${agentPayload.run.runId}`, at: agentPayload.run.createdAt, kind: "agent", payload: agentPayload });
   timeline.sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
 
