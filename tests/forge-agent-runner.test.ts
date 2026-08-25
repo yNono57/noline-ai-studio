@@ -82,7 +82,7 @@ test("restauration du fil attend messages et AgentRun avant de cibler la convers
   assert.match(source, /Promise\.all\(\[listForgeMessages\(conversationId\), getLatestForgeAgentRun\(conversationId\)\]\)/);
   assert.match(source, /setRestoreScrollConversationId\(restored\.conversationId\)/);
   assert.match(source, /restoreScrollConversationId !== conversationId \|\| contentLoadedConversationId !== conversationId/);
-  assert.match(source, /requestAnimationFrame[\s\S]*requestAnimationFrame[\s\S]*messagesViewport\.current\?\.scrollTo[\s\S]*conversationSection\.current\?\.scrollIntoView/);
+  assert.match(source, /requestAnimationFrame[\s\S]*requestAnimationFrame[\s\S]*scrollForgeChatToLatest\(messagesViewport\.current, "auto"\)[\s\S]*conversationSection\.current\?\.scrollIntoView/);
   assert.match(source, /Revenir aux messages récents/);
 });
 test("mission Production démarre par un PLAN serveur puis lit réellement package.json", async () => {

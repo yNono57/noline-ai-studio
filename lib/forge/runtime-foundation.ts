@@ -56,9 +56,9 @@ const transitions: Record<ForgeRuntimeStatus, readonly ForgeRuntimeStatus[]> = {
   CREATING: ["READY", "ERROR", "UNPROVISIONED", "DESTROYING"],
   READY: ["ERROR", "EXPIRED", "DESTROYING"],
   ERROR: ["CREATING", "DESTROYING", "DESTROYED"],
-  EXPIRED: ["DESTROYING", "DESTROYED"],
+  EXPIRED: ["CREATING", "DESTROYING", "DESTROYED"],
   DESTROYING: ["DESTROYED", "ERROR"],
-  DESTROYED: [],
+  DESTROYED: ["CREATING"],
 };
 
 export function assertRuntimeTransition(from: ForgeRuntimeStatus, to: ForgeRuntimeStatus) {
@@ -107,6 +107,7 @@ export type ForgeRuntimeServiceDependencies = {
   getOwnedWorkspace(userId: string, conversationId: string): Promise<OwnedWorkspace | null>;
   findByWorkspace(userId: string, workspaceId: string, provider: string): Promise<ForgeRuntime | null>;
   insert(input: Omit<ForgeRuntime, "runtimeId" | "createdAt" | "updatedAt">): Promise<{ runtime: ForgeRuntime; created: boolean }>;
+  claimForReprovision(userId: string, runtimeId: string, lastActivityAt: string): Promise<ForgeRuntime | null>;
   update(userId: string, runtimeId: string, input: RuntimeUpdate): Promise<ForgeRuntime>;
   getSourceCredential?(userId: string, repository: string): Promise<ForgeRuntimeSourceCredential>;
   provider: ForgeRuntimeProvider;
@@ -128,33 +129,41 @@ export function createForgeRuntimeService(deps: ForgeRuntimeServiceDependencies)
     if (runtime.workspaceId !== workspace.workspaceId || runtime.userId !== workspace.userId || runtime.baseCommitSha !== workspace.baseCommitSha) throw new ForgeRuntimeError("CONFLICT", "La source immuable du runtime ne correspond pas au workspace.");
   }
 
-  async function create(userId: string, conversationId: string) {
-    const workspace = await source(userId, conversationId);
-    const existing = await deps.findByWorkspace(userId, workspace.workspaceId, deps.provider.name);
-    if (existing) {
-      ensureRelation(existing, workspace);
-      if (["DESTROYING", "DESTROYED", "EXPIRED"].includes(existing.status)) throw new ForgeRuntimeError("CONFLICT", "Ce runtime ne peut pas être recréé dans son état actuel.");
-      return existing;
-    }
-    const inserted = await deps.insert({ workspaceId: workspace.workspaceId, userId, provider: deps.provider.name, providerRuntimeId: null, status: deps.provider.provisioningAvailable ? "CREATING" : "UNPROVISIONED", baseCommitSha: workspace.baseCommitSha, readyAt: null, expiresAt: null, lastActivityAt: null, errorCode: null });
-    let runtime = inserted.runtime;
-    if (!inserted.created) return runtime;
-    if (!deps.provider.provisioningAvailable) return runtime;
+  async function provision(userId: string, workspace: OwnedWorkspace, runtime: ForgeRuntime) {
+    if (!deps.provider.provisioningAvailable) return runtime.status === "UNPROVISIONED" ? runtime : deps.update(userId, runtime.runtimeId, { providerRuntimeId: null, status: "UNPROVISIONED", readyAt: null, expiresAt: null, errorCode: null });
     const runtimeSource: ForgeRuntimeSource = { repository: workspace.repository, branch: workspace.branch, baseCommitSha: workspace.baseCommitSha };
     try {
       if (deps.getSourceCredential) runtimeSource.credential = await deps.getSourceCredential(userId, workspace.repository);
       const provisioned = await deps.provider.createRuntime(runtime, runtimeSource);
       assertRuntimeTransition(runtime.status, provisioned.status);
-      runtime = await deps.update(userId, runtime.runtimeId, { providerRuntimeId: provisioned.providerRuntimeId, status: provisioned.status, readyAt: provisioned.readyAt, expiresAt: provisioned.expiresAt, lastActivityAt: deps.now(), errorCode: null });
-      return runtime;
+      return deps.update(userId, runtime.runtimeId, { providerRuntimeId: provisioned.providerRuntimeId, status: provisioned.status, readyAt: provisioned.readyAt, expiresAt: provisioned.expiresAt, lastActivityAt: deps.now(), errorCode: null });
     } catch (error) {
       await deps.update(userId, runtime.runtimeId, { status: "ERROR", errorCode: "PROVISION_FAILED" });
       throw error;
-    } finally {
-      delete runtimeSource.credential;
-    }
+    } finally { delete runtimeSource.credential; }
   }
 
+  async function create(userId: string, conversationId: string) {
+    const workspace = await source(userId, conversationId);
+    const existing = await deps.findByWorkspace(userId, workspace.workspaceId, deps.provider.name);
+    if (existing) {
+      ensureRelation(existing, workspace);
+      if (["READY", "CREATING", "UNPROVISIONED"].includes(existing.status)) return existing;
+      if (existing.status === "DESTROYING") throw new ForgeRuntimeError("CONFLICT", "Le runtime est en cours de destruction.");
+      assertRuntimeTransition(existing.status, "CREATING");
+      let runtime = await deps.claimForReprovision(userId, existing.runtimeId, deps.now());
+      if (!runtime) return (await deps.findByWorkspace(userId, workspace.workspaceId, deps.provider.name)) || existing;
+      if (existing.providerRuntimeId) {
+        try { await deps.provider.destroyRuntime(existing); }
+        catch (error) { await deps.update(userId, runtime.runtimeId, { providerRuntimeId: existing.providerRuntimeId, status: "ERROR", errorCode: "REPROVISION_CLEANUP_FAILED" }); throw error; }
+      }
+      runtime = await deps.update(userId, runtime.runtimeId, { providerRuntimeId: null, status: "CREATING", readyAt: null, expiresAt: null, lastActivityAt: deps.now(), errorCode: null });
+      return provision(userId, workspace, runtime);
+    }
+    const inserted = await deps.insert({ workspaceId: workspace.workspaceId, userId, provider: deps.provider.name, providerRuntimeId: null, status: deps.provider.provisioningAvailable ? "CREATING" : "UNPROVISIONED", baseCommitSha: workspace.baseCommitSha, readyAt: null, expiresAt: null, lastActivityAt: null, errorCode: null });
+    if (!inserted.created) return inserted.runtime;
+    return provision(userId, workspace, inserted.runtime);
+  }
   async function get(userId: string, conversationId: string) {
     const workspace = await source(userId, conversationId);
     let runtime = await deps.findByWorkspace(userId, workspace.workspaceId, deps.provider.name);

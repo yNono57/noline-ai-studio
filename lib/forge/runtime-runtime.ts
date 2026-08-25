@@ -5,12 +5,13 @@ import { createForgeRuntimeService } from "./runtime-foundation";
 import { daytonaRuntimeProvider } from "./daytona-runtime-provider";
 import { getRepositoryInstallationToken } from "./github-provider";
 import { requireActiveGitHubConnection } from "./github-store";
-import { findRuntimeByWorkspace, insertForgeRuntime, updateForgeRuntime } from "./runtime-store";
+import { claimForgeRuntimeForReprovision, findRuntimeByWorkspace, insertForgeRuntime, updateForgeRuntime } from "./runtime-store";
 
 export const forgeRuntimeService = createForgeRuntimeService({
   async getOwnedWorkspace(userId, conversationId) { return forgeWorkspaceService.get(userId, conversationId); },
   findByWorkspace: findRuntimeByWorkspace,
   insert: insertForgeRuntime,
+  claimForReprovision: claimForgeRuntimeForReprovision,
   update: updateForgeRuntime,
   async getSourceCredential(userId, repository) {
     const [owner, name, extra] = repository.split("/");

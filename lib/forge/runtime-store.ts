@@ -23,6 +23,10 @@ export async function insertForgeRuntime(input: Omit<ForgeRuntime, "runtimeId" |
   return { runtime: existing, created: false };
 }
 
+export async function claimForgeRuntimeForReprovision(userId: string, runtimeId: string, lastActivityAt: string) {
+  const data = await rows(`/rest/v1/forge_workspace_runtimes?id=eq.${encode(runtimeId)}&user_id=eq.${encode(userId)}&status=in.(ERROR,EXPIRED,DESTROYED)&select=${fields}`, { method: "PATCH", body: JSON.stringify({ status: "CREATING", ready_at: null, expires_at: null, last_activity_at: lastActivityAt, error_code: null }) });
+  return data[0] ? map(data[0]) : null;
+}
 export async function updateForgeRuntime(userId: string, runtimeId: string, input: RuntimeUpdate) {
   const body = { ...(input.providerRuntimeId !== undefined ? { provider_runtime_id: input.providerRuntimeId } : {}), ...(input.status !== undefined ? { status: input.status } : {}), ...(input.readyAt !== undefined ? { ready_at: input.readyAt } : {}), ...(input.expiresAt !== undefined ? { expires_at: input.expiresAt } : {}), ...(input.lastActivityAt !== undefined ? { last_activity_at: input.lastActivityAt } : {}), ...(input.errorCode !== undefined ? { error_code: input.errorCode } : {}) };
   const data = await rows(`/rest/v1/forge_workspace_runtimes?id=eq.${encode(runtimeId)}&user_id=eq.${encode(userId)}&select=${fields}`, { method: "PATCH", body: JSON.stringify(body) });

@@ -17,10 +17,11 @@ function runtimeHarness() {
   const runtimes: Array<Record<string, unknown>> = [];
   let capturedSource: Record<string, unknown> | null = null;
   let deletedPath: string | null = null;
+  let provisionCount = 0, destructionCount = 0;
   const provider = {
     name: "test-provider", provisioningAvailable: false,
-    async createRuntime(_runtime: unknown, source: Record<string, unknown>) { capturedSource = source; return { providerRuntimeId: "provider-runtime", status: "READY", readyAt: "2026-08-24T00:00:01.000Z", expiresAt: null }; },
-    async getRuntime() { return null; }, async destroyRuntime() {},
+    async createRuntime(_runtime: unknown, source: Record<string, unknown>) { capturedSource = source; provisionCount += 1; return { providerRuntimeId: `provider-runtime-${provisionCount}`, status: "READY", readyAt: "2026-08-24T00:00:01.000Z", expiresAt: null }; },
+    async getRuntime() { return null; }, async destroyRuntime() { destructionCount += 1; },
     async readFile() { throw new Error("not implemented"); }, async writeFile() { throw new Error("not implemented"); }, async deleteFile(_runtime: unknown, path: string) { deletedPath = path; }, async listFiles() { throw new Error("not implemented"); },
     async executeCommand() { throw new Error("not implemented"); }, async getGitStatus() { throw new Error("not implemented"); }, async getGitDiff() { throw new Error("not implemented"); },
   };
@@ -28,11 +29,12 @@ function runtimeHarness() {
     async getOwnedWorkspace(userId: string, conversationId: string) { return userId === "user-a" && conversationId === "conversation-a" ? workspace : null; },
     async findByWorkspace(userId: string, workspaceId: string, providerName: string) { return runtimes.find((item) => item.userId === userId && item.workspaceId === workspaceId && item.provider === providerName) || null; },
     async insert(input: Record<string, unknown>) { const row = { ...input, runtimeId: `runtime-${runtimes.length + 1}`, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" }; runtimes.push(row); return { runtime: row, created: true }; },
+    async claimForReprovision(_userId: string, runtimeId: string, lastActivityAt: string) { const row = runtimes.find((item) => item.runtimeId === runtimeId); if (!row || !["ERROR", "EXPIRED", "DESTROYED"].includes(String(row.status))) return null; Object.assign(row, { status: "CREATING", readyAt: null, expiresAt: null, lastActivityAt, errorCode: null }); return row; },
     async update(_userId: string, runtimeId: string, input: Record<string, unknown>) { const row = runtimes.find((item) => item.runtimeId === runtimeId); if (!row) throw new Error("missing runtime"); Object.assign(row, input); return row; },
     provider,
     now: () => "2026-08-24T00:00:02.000Z",
   };
-  return { service: createForgeRuntimeService(deps), provider, runtimes, capturedSource: () => capturedSource, deletedPath: () => deletedPath, setWorkspace(next: typeof workspace) { workspace = next; } };
+  return { service: createForgeRuntimeService(deps), provider, runtimes, capturedSource: () => capturedSource, deletedPath: () => deletedPath, provisionCount: () => provisionCount, destructionCount: () => destructionCount, setWorkspace(next: typeof workspace) { workspace = next; } };
 }
 
 function readyRuntime(status = "READY") {
@@ -57,6 +59,30 @@ runtimeTest("provider reçoit repository, branche et SHA immuable", async () => 
   runtimeAssert.equal(runtime.baseCommitSha, "a".repeat(40)); runtimeAssert.deepEqual(target.capturedSource(), { repository: "owner/repo", branch: "main", baseCommitSha: "a".repeat(40) });
 });
 
+runtimeTest("runtime READY existant reste idempotent", async () => {
+  const target = runtimeHarness(); target.provider.provisioningAvailable = true;
+  const first = await target.service.create("user-a", "conversation-a"); const second = await target.service.create("user-a", "conversation-a");
+  runtimeAssert.equal(first.runtimeId, second.runtimeId); runtimeAssert.equal(second.status, "READY"); runtimeAssert.equal(target.provisionCount(), 1);
+});
+
+runtimeTest("runtime EXPIRÉ recrée un nouveau sandbox sur le workspace immuable", async () => {
+  const target = runtimeHarness(); target.provider.provisioningAvailable = true; const first = await target.service.create("user-a", "conversation-a"); const firstProviderRuntimeId = first.providerRuntimeId;
+  Object.assign(target.runtimes[0], { status: "EXPIRED", expiresAt: "2026-08-23T00:00:00.000Z" });
+  const restarted = await target.service.create("user-a", "conversation-a");
+  runtimeAssert.equal(restarted.runtimeId, first.runtimeId); runtimeAssert.notEqual(restarted.providerRuntimeId, firstProviderRuntimeId); runtimeAssert.equal(restarted.status, "READY"); runtimeAssert.equal(restarted.workspaceId, "workspace-a"); runtimeAssert.equal(restarted.baseCommitSha, "a".repeat(40)); runtimeAssert.deepEqual(target.capturedSource(), { repository: "owner/repo", branch: "main", baseCommitSha: "a".repeat(40) }); runtimeAssert.equal(target.destructionCount(), 1);
+});
+
+runtimeTest("runtime DÉTRUIT peut créer un nouveau sandbox sans nouvelle session", async () => {
+  const target = runtimeHarness(); target.provider.provisioningAvailable = true; const first = await target.service.create("user-a", "conversation-a"); await target.service.destroy("user-a", "conversation-a");
+  const restarted = await target.service.create("user-a", "conversation-a");
+  runtimeAssert.equal(restarted.runtimeId, first.runtimeId); runtimeAssert.equal(restarted.status, "READY"); runtimeAssert.equal(target.runtimes.length, 1); runtimeAssert.equal(target.provisionCount(), 2);
+});
+
+runtimeTest("double reprovisioning terminal ne crée qu’un sandbox actif", async () => {
+  const target = runtimeHarness(); target.provider.provisioningAvailable = true; await target.service.create("user-a", "conversation-a"); target.runtimes[0].status = "EXPIRED";
+  await Promise.all([target.service.create("user-a", "conversation-a"), target.service.create("user-a", "conversation-a")]);
+  runtimeAssert.equal(target.provisionCount(), 2); runtimeAssert.equal(target.runtimes.length, 1); runtimeAssert.equal(target.runtimes[0].status, "READY");
+});
 runtimeTest("un autre repository ou une autre branche utilise un workspace/runtime distinct", async () => {
   const target = runtimeHarness(); const first = await target.service.create("user-a", "conversation-a");
   target.setWorkspace({ workspaceId: "workspace-b", userId: "user-a", status: "READY", repository: "other/repo", branch: "feature", baseCommitSha: "b".repeat(40) });
