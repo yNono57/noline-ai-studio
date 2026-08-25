@@ -1,7 +1,7 @@
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "./forge-store";
 import type { ForgeWorkspaceView } from "./workspace-foundation";
 import type { ForgeRuntimeCommand, ForgeRuntimeCommandResult, ForgeRuntimeFile, ForgeRuntimeFileEntry, ForgeRuntimeGitDiff, ForgeRuntimeGitStatus, ForgeRuntimeView } from "./runtime-foundation";
-import type { ForgeAgentRunView, ForgeAgentStep } from "./agent-foundation";
+import type { ForgeAgentRunView, ForgeAgentStep, ForgeRunArtifact } from "./agent-foundation";
 import { getAuthenticatedHeaders } from "../supabase-client";
 
 export class ForgeClientError extends Error {
@@ -98,7 +98,7 @@ export function getForgeRuntimeGitDiff(conversationId: string, limit?: number) {
   return request<{ diff: ForgeRuntimeGitDiff }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/git/diff${query}`);
 }
 
-export type ForgeAgentRunPayload = { run: ForgeAgentRunView; steps: ForgeAgentStep[] };
+export type ForgeAgentRunPayload = { run: ForgeAgentRunView; steps: ForgeAgentStep[]; artifact: ForgeRunArtifact | null };
 export function getLatestForgeAgentRun(conversationId: string) { return request<{ agentRun: ForgeAgentRunPayload | null; agentRuns: ForgeAgentRunPayload[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`); }
 export function startForgeAgentRun(conversationId: string, objective: string, submissionId: string) { return request<{ agentRun: ForgeAgentRunPayload; conversation: ForgeConversation; user_message: ForgeMessage; assistant_message: ForgeMessage | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective, submission_id: submissionId }) }); }
 export function cancelForgeAgentRun(conversationId: string, runId: string) { return request<{ run: ForgeAgentRunView }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs/${encodeURIComponent(runId)}`, { method: "DELETE" }); }

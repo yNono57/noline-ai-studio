@@ -140,12 +140,14 @@ export function ForgeWorkspace() {
     let active = true;
     setDiffSummary(null);
     if (!conversationId || agentPayload?.run.status !== "COMPLETED") return () => { active = false; };
+    if (agentPayload.artifact) { setDiffSummary({ files: agentPayload.artifact.changedFiles.length, additions: agentPayload.artifact.additions, deletions: agentPayload.artifact.deletions }); return () => { active = false; }; }
+    if (runtimeView?.status !== "READY") return () => { active = false; };
     getForgeRuntimeGitDiff(conversationId).then(({ diff }) => {
       if (!active) return;
       setDiffSummary(summarizeForgeDiff(diff));
     }).catch(() => { if (active) setDiffSummary(null); });
     return () => { active = false; };
-  }, [agentPayload?.run.runId, agentPayload?.run.status, conversationId]);
+  }, [agentPayload?.artifact, agentPayload?.run.runId, agentPayload?.run.status, conversationId, runtimeView?.status]);
   const scrollToLatest = useCallback(() => { followMessages.current = true; setShowLatestButton(false); scrollForgeChatToLatest(messagesViewport.current, "smooth"); }, []);
   const selectConversation = useCallback((id: string) => { restoreCandidate.current = null; followMessages.current = true; setShowLatestButton(false); setConversationId(id); if (projectId) saveForgeSessionRestore(window.localStorage, { projectId, conversationId: id }); }, [projectId]);
   const selectProject = useCallback((id: string) => { restoreCandidate.current = null; clearForgeSessionRestore(window.localStorage); setProjectId(id); }, []);
@@ -278,7 +280,7 @@ export function ForgeWorkspace() {
       <ForgeWorkspaceDrawer open={workspaceOpen} title={conversation?.title || project?.name || "Forge"} onClose={() => setWorkspaceOpen(false)}>
         <section id="forge-workspace-source" className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><div className="flex items-center gap-2"><Github className="h-4 w-4 text-noline-orange" /><h3 className="text-xs font-black uppercase tracking-wide text-white">Source</h3></div><div className="mt-3 space-y-2 text-xs text-noline-muted"><p className="truncate">Repository · {project?.repository_identifier || "Non connecté"}</p><p className="truncate">Branche · {project?.default_branch || "Non connectée"}</p><p>Contexte · {(contextByConversation[conversationId] || []).length} fichier(s)</p><p>GitHub · lecture seule</p></div></section>
         <ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} onRuntimeChange={setRuntimeView} onConversationUpdated={(updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))} onAgentPayloadChange={handleAgentPayload} onAgentMessagesPersisted={(persisted) => { setMessages((current) => mergeMessages(current, persisted)); setPendingAgentMission(null); }} onAgentLaunchSettled={() => { agentSubmissionInFlight.current = false; }} />
-        <ForgeGitDiffPanel conversationId={conversationId} active={workspaceOpen && workspaceSection === "git" && runtimeReady} />
+        <ForgeGitDiffPanel conversationId={conversationId} active={workspaceOpen && workspaceSection === "git" && (runtimeReady || Boolean(agentPayload?.artifact))} artifact={agentPayload?.artifact || null} />
         <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3" open={workspaceSection === "source"}><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-black text-white"><Menu className="h-4 w-4 text-noline-orange" />Files & contexte</summary><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></details>
       </ForgeWorkspaceDrawer>
     </div>

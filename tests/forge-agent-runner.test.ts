@@ -3,26 +3,27 @@ export {};
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
-const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentObjective, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
+const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentObjective, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS, createCompletionArtifactInput, FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS, ForgeAgentError } = require("../lib/forge/agent-foundation.ts");
 const { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } = require("../lib/forge/agent-limits.ts");
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
 const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
 const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
-function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>, constraint?: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string>; missingFiles?: string[]; blockedFiles?: string[]; commandResults?: Array<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number }> } = {}) {
-  let run: Record<string, unknown> | null = null; let runCreates = 0; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const constraints: Array<Record<string, unknown> | undefined> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
+function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>, constraint?: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string>; missingFiles?: string[]; blockedFiles?: string[]; commandResults?: Array<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number }>; gitDiff?: { added: string[]; modified: string[]; deleted: string[]; patch: string; truncated: boolean }; artifactFailure?: boolean } = {}) {
+  let run: Record<string, unknown> | null = null; let runCreates = 0; const steps: Array<Record<string, unknown>> = []; const artifacts: Array<Record<string, unknown>> = []; const events: string[] = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const constraints: Array<Record<string, unknown> | undefined> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { runCreates += 1; run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
     async updateRun(_userId: string, _runId: string, input: Record<string, unknown>) { Object.assign(run as object, input); return run; },
-    async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
+    async appendStep(_userId: string, input: Record<string, unknown>) { events.push(String(input.type)); const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
+    async createArtifact(_userId: string, input: Record<string, unknown>) { if (options.artifactFailure) throw new ForgeAgentError("PERSISTENCE", "Persistance artifact indisponible."); events.push("ARTIFACT"); const artifact = { ...input, artifactId: `artifact-${artifacts.length + 1}`, createdAt: "2026-08-24T00:00:01.000Z" }; artifacts.push(artifact); return artifact; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed","scripts":{"build":"vite build"}}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed","scripts":{"build":"vite build"}}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { if (options.gitDiff) return options.gitDiff; return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>, constraint?: Record<string, unknown>) { contexts.push(context); constraints.push(constraint); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context, constraint) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, commands, writes, reads, lists, contexts, constraints, files };
+  return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, artifacts, events, commands, writes, reads, lists, contexts, constraints, files };
 }
 
 test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
@@ -734,4 +735,67 @@ test("completion gate: texte Build completed avec exitCode non nul reste un éch
   assert.equal(target.steps.find((step) => step.summary === "Build")?.status, "FAILED");
   assert.match(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /exited 1/);
   assert.notEqual(target.run()?.status, "COMPLETED");
+});
+
+
+test("artifact COMPLETED persiste le vrai Git diff avant FINAL et reste lié au run hors runtime", async () => {
+  const realPatch = "diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1 +1 @@\n-old\n+real runtime content";
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Modifier", tool: "write_file", input: { path: "src/index.ts", content: "real runtime content" } },
+    { type: "TOOL_CALL", summary: "Status", tool: "git_status", input: {} },
+    { type: "TOOL_CALL", summary: "Diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Terminé", report: "Rapport modèle sans le contenu réel du patch." },
+  ], false, { gitDiff: { added: [], modified: ["src/index.ts"], deleted: [], patch: realPatch, truncated: false } });
+  const result = await target.runner.run("user-a", "conversation-a", "Modifie src/index.ts puis vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.artifacts.length, 1);
+  assert.deepEqual(target.artifacts[0], {
+    runId: "run-a", repository: "yNono57/noline-forge-testbed", baseCommitSha: "a".repeat(40), sourceBranch: "main",
+    changedFiles: ["src/index.ts"], additions: 1, deletions: 1, patch: realPatch, status: "READY",
+    artifactId: "artifact-1", createdAt: "2026-08-24T00:00:01.000Z",
+  });
+  assert.ok(target.events.indexOf("ARTIFACT") < target.events.lastIndexOf("FINAL"));
+  target.files.clear();
+  const replacementRuntime = { runtimeId: "runtime-b", status: "READY" };
+  assert.equal(replacementRuntime.runtimeId, "runtime-b");
+  assert.equal(target.artifacts[0]?.runId, "run-a");
+  assert.equal(target.artifacts[0]?.patch, realPatch);
+  assert.doesNotMatch(String(target.artifacts[0]?.patch), /Rapport modèle/);
+});
+
+test("échec de persistance artifact interdit le faux COMPLETED et conserve le runtime mock", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Modifier", tool: "write_file", input: { path: "src/index.ts", content: "ready" } },
+    { type: "TOOL_CALL", summary: "Status", tool: "git_status", input: {} },
+    { type: "TOOL_CALL", summary: "Diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Terminé", report: "Ne doit pas être persisté comme terminé." },
+  ], false, { artifactFailure: true });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Modifie src/index.ts puis vérifie Git status et Git diff."), /Persistance artifact indisponible/);
+  assert.equal(target.run()?.status, "FAILED");
+  assert.equal(target.steps.some((step) => step.type === "FINAL" && step.status === "COMPLETED"), false);
+  assert.equal(target.files.get("src/index.ts"), "ready");
+});
+
+test("artifact refuse explicitement diff tronqué, trop volumineux et chemins sensibles", () => {
+  const base = { added: ["src/index.ts"], modified: [] as string[], deleted: [] as string[], patch: "+safe", truncated: false };
+  assert.throws(() => createCompletionArtifactInput("run-a", "owner/repo", "a".repeat(40), "main", { ...base, truncated: true }), /trop volumineux/);
+  assert.throws(() => createCompletionArtifactInput("run-a", "owner/repo", "a".repeat(40), "main", { ...base, patch: "x".repeat(FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS + 1) }), /trop volumineux/);
+  assert.throws(() => createCompletionArtifactInput("run-a", "owner/repo", "a".repeat(40), "main", { ...base, added: [".env"] }), /chemin sensible/);
+});
+
+test("artifact sans changement Git est persisté EMPTY de façon déterministe", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Modifier puis restaurer", tool: "write_file", input: { path: "src/index.ts", content: "unchanged" } },
+    { type: "TOOL_CALL", summary: "Status", tool: "git_status", input: {} },
+    { type: "TOOL_CALL", summary: "Diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Terminé", report: "Aucun changement Git final." },
+  ], false, { gitDiff: { added: [], modified: [], deleted: [], patch: "", truncated: false } });
+  assert.equal((await target.runner.run("user-a", "conversation-a", "Modifie puis restaure src/index.ts et contrôle Git status et Git diff.")).status, "COMPLETED");
+  assert.deepEqual({ status: target.artifacts[0]?.status, changedFiles: target.artifacts[0]?.changedFiles, patch: target.artifacts[0]?.patch }, { status: "EMPTY", changedFiles: [], patch: "" });
+});
+
+test("migration artifact est additive, bornée et protégée par ownership RLS", () => {
+  const sql = fs.readFileSync("supabase/migrations/20260825_forge_run_artifacts.sql", "utf8");
+  for (const value of ["create table if not exists public.forge_run_artifacts", "run_id uuid not null unique", "length(patch) <= 200000", "enable row level security", "auth.uid() = forge_run_artifacts.user_id", "r.id = forge_run_artifacts.run_id"]) assert.ok(sql.toLowerCase().includes(value.toLowerCase()));
+  assert.doesNotMatch(sql, /drop table|truncate/i);
 });

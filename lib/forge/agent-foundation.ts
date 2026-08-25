@@ -7,6 +7,10 @@ export type ForgeAgentStepType = "PLAN" | "TOOL_CALL" | "FINAL" | "FAIL";
 export type ForgeAgentToolName = "list_files" | "read_file" | "write_file" | "delete_file" | "run_command" | "git_status" | "git_diff";
 export type ForgeAgentRun = { runId: string; userId: string; projectId: string; conversationId: string; workspaceId: string; runtimeId: string; status: ForgeAgentRunStatus; objective: string; baseCommitSha: string; plan: string[]; finalReport: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; lastActivityAt: string | null; error: string | null };
 export type ForgeAgentRunView = Omit<ForgeAgentRun, "userId">;
+export const FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS = 200_000;
+export type ForgeRunArtifactStatus = "READY" | "EMPTY";
+export type ForgeRunArtifact = { artifactId: string; runId: string; repository: string; baseCommitSha: string; sourceBranch: string; changedFiles: string[]; additions: number; deletions: number; patch: string; status: ForgeRunArtifactStatus; createdAt: string };
+export type ForgeRunArtifactInput = Omit<ForgeRunArtifact, "artifactId" | "createdAt">;
 export type ForgeAgentStep = { stepId: string; runId: string; stepNumber: number; type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: "RUNNING" | "COMPLETED" | "FAILED"; startedAt: string; completedAt: string | null };
 export type ForgeAgentDecision = { type: "PLAN"; summary: string; plan: string[] } | { type: "TOOL_CALL"; summary: string; tool: ForgeAgentToolName; input: Record<string, unknown> } | { type: "FINAL"; summary: string; report: string } | { type: "FAIL"; summary: string; error: string };
 export type ForgeMissionRequirements = { mutation: boolean; validation: boolean; gitStatus: boolean; gitDiff: boolean };
@@ -45,6 +49,7 @@ export type ForgeAgentRunnerDependencies = {
   updateRun(userId: string, runId: string, input: Partial<Pick<ForgeAgentRun, "status" | "plan" | "finalReport" | "startedAt" | "completedAt" | "lastActivityAt" | "error">>): Promise<ForgeAgentRun>;
   appendStep(userId: string, input: Omit<ForgeAgentStep, "stepId">): Promise<ForgeAgentStep>;
   updateStep(userId: string, stepId: string, input: Pick<ForgeAgentStep, "resultSummary" | "status" | "completedAt">): Promise<ForgeAgentStep>;
+  createArtifact(userId: string, input: ForgeRunArtifactInput): Promise<ForgeRunArtifact>;
   isCancelled(userId: string, runId: string): Promise<boolean>;
   runtime(userId: string, conversationId: string): ForgeAgentRuntimeAdapter;
   model: ForgeAgentModelProvider;
@@ -93,6 +98,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let minimalRepositoryConfirmed = false;
     let packageScripts: Map<string, string> | null = null;
     const successfulPackageValidations = new Set<string>();
+    let observedGitDiff: ForgeRuntimeGitDiff | null = null;
+    let completionArtifact: ForgeRunArtifact | null = null;
     let validationRecovery: ForgeValidationRecovery | null = null;
     let lastPrematureProgressKey: string | null = null;
     let prematureWithoutProgress = 0;
@@ -188,7 +195,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               stalledDecisions = 0;
               prematureTerminations = 0;
               if (commandKey) failedValidationCommands.delete(commandKey);
-              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; successfulPackageValidations.clear(); if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
+              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; observedGitDiff = null; completionArtifact = null; successfulPackageValidations.clear(); if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
               if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && requestedNpmScript && availablePackageValidations(packageScripts).has(requestedNpmScript)) successfulPackageValidations.add(requestedNpmScript); if (validation && validationRecovery && (mutationVersion > validationRecovery.failureMutationVersion || validationRecovery.failureKind === "COMMAND_CWD")) validationRecovery = null; }
               if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(inspectionSignature); inspectionSatisfied = true; }
               if (validationRecovery && decision.tool === "list_files") validationRecovery.inspectionsSinceFailure.add(normalizeAgentPath(decision.input.path ?? ".", true));
@@ -197,7 +204,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               if (decision.tool === "read_file" && normalizeAgentPath(decision.input.path) === "package.json") packageScripts = parsePackageScripts((result as ForgeRuntimeFile).content);
               if (decision.tool === "write_file" && normalizeAgentPath(decision.input.path) === "package.json" && typeof decision.input.content === "string") packageScripts = parsePackageScripts(decision.input.content);
               if (decision.tool === "git_status") gitStatusSucceeded = true;
-              if (decision.tool === "git_diff") gitDiffSucceeded = true;
+              if (decision.tool === "git_diff") { gitDiffSucceeded = true; observedGitDiff = result as ForgeRuntimeGitDiff; }
             }
             steps.push({ ...persisted, resultSummary: modelSummary });
             if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
@@ -257,7 +264,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               successfulToolCalls += 1;
               prematureTerminations = 0;
               if (mandatoryTool === "git_status") gitStatusSucceeded = true;
-              else gitDiffSucceeded = true;
+              else { gitDiffSucceeded = true; observedGitDiff = result as ForgeRuntimeGitDiff; }
               steps.push({ ...persisted, resultSummary: summarizeToolResult(mandatoryTool, result, true) });
               run = await deps.updateRun(userId, run.runId, { status: "VALIDATING", lastActivityAt: deps.now() });
             } catch (error) {
@@ -271,6 +278,10 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           if (validationFailed) {
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Validation encore en échec", tool: null, input: {}, resultSummary: "Une validation explicitement demandée doit repasser avant la fin.", status: "FAILED", startedAt: now, completedAt: now }));
             continue;
+          }
+          if (mutationOccurred && !completionArtifact) {
+            if (!observedGitDiff) throw new ForgeAgentError("PERSISTENCE", "Artifact Forge impossible: aucun Git diff réel disponible.");
+            completionArtifact = await deps.createArtifact(userId, createCompletionArtifactInput(run.runId, context.repository, context.baseCommitSha, context.branch, observedGitDiff));
           }
           const report = sanitizeAgentText(decision.report, 20_000);
           await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now });
@@ -299,6 +310,15 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     }
   }
   return { run };
+}
+
+export function createCompletionArtifactInput(runId: string, repository: string, baseCommitSha: string, sourceBranch: string, diff: ForgeRuntimeGitDiff): ForgeRunArtifactInput {
+  if (diff.truncated || diff.patch.length > FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS) throw new ForgeAgentError("LIMIT", `Artifact Forge trop volumineux: limite ${FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS} caractères, aucune troncature persistée.`);
+  const changedFiles = [...new Set([...diff.added, ...diff.modified, ...diff.deleted])].sort();
+  if (changedFiles.some((path) => /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.npmrc|\.pypirc|id_rsa|id_ed25519|credentials?|secrets?)(\/|$)/i.test(path))) throw new ForgeAgentError("INVALID_INPUT", "Artifact Forge refusé: le Git diff contient un chemin sensible.");
+  let additions = 0, deletions = 0;
+  for (const line of diff.patch.split("\n")) { if (line.startsWith("+") && !line.startsWith("+++")) additions += 1; else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1; }
+  return { runId, repository, baseCommitSha, sourceBranch, changedFiles, additions, deletions, patch: diff.patch, status: changedFiles.length || diff.patch.length ? "READY" : "EMPTY" };
 }
 
 function currentAgentPhase(recovery: ForgeValidationRecovery | null): ForgeAgentPhase {
