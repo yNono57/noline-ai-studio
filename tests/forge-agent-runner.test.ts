@@ -3,7 +3,8 @@ export {};
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
-const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
+const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentObjective, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
+const { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } = require("../lib/forge/agent-limits.ts");
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
 const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
@@ -154,6 +155,22 @@ test("completion gates distinguent lecture, mutation, validation et Git", () => 
   assert.deepEqual(deriveForgeMissionRequirements("Vérifie Git status."), { mutation: false, validation: false, gitStatus: true, gitDiff: false });
 });
 
+test("missions longues utilisent une limite de sécurité partagée et non 4000 caractères", () => {
+  const longObjective = `Construis le projet. ${"détail ".repeat(800)}`;
+  assert.ok(longObjective.length > 4_000);
+  assert.equal(normalizeAgentObjective(longObjective), longObjective.trim());
+  let submitted = "";
+  submitForgeComposer("agent", longObjective, { chat: () => undefined, agent: (value: string) => { submitted = value; } });
+  assert.equal(submitted, longObjective);
+  assert.equal(FORGE_AGENT_LIMITS.maxObjectiveCharacters, FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS);
+  assert.ok(FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS >= 50_000);
+  assert.throws(() => normalizeAgentObjective("   "), /ne peut pas être vide/);
+  assert.throws(() => normalizeAgentObjective("x".repeat(FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS + 1)), /limite de sécurité/);
+  const panel = fs.readFileSync("components/ForgeAgentRunnerPanel.tsx", "utf8");
+  assert.match(panel, /maxLength=\{FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS\}/);
+  assert.doesNotMatch(panel, /maxLength=\{4000\}|entre 1 et 4000/);
+});
+
 test("repository minimal ECLYRA refuse FINAL d inspection puis implémente, corrige et valide", async () => {
   const objective = "Transforme ce repository minimal en petite application React TypeScript jouable avec plusieurs fichiers. Lance le build, puis vérifie Git status et Git diff.";
   const premature = { type: "FINAL", summary: "Stack absente", report: "Le dépôt ne contient que .git, README.md et hello-forge.txt. Aucune stack n’est présente; prochaines étapes: initialiser l’application." };
@@ -190,6 +207,7 @@ test("repository minimal traite un fichier optionnel absent comme information pu
   const target = harness([
     { type: "TOOL_CALL", summary: "Lister la racine", tool: "list_files", input: { path: "." } },
     { type: "TOOL_CALL", summary: "Chercher package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Rechercher package absent", tool: "read_file", input: { path: "package.json" } },
     { type: "TOOL_CALL", summary: "Lire README", tool: "read_file", input: { path: "README.md" } },
     { type: "FAIL", summary: "Inspection insuffisante", error: "Aucun fichier source n’a été localisé." },
     (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /OPTIONAL FILE ABSENT/); assert.match(history, /Repository minimal confirmé/); assert.match(history, /obligation d.inspection est satisfaite/i); assert.match(history, /write_file\/delete_file/); return { type: "TOOL_CALL", summary: "Créer package", tool: "write_file", input: { path: "package.json", content: '{"scripts":{"build":"tsc"}}' } }; },
@@ -204,6 +222,7 @@ test("repository minimal traite un fichier optionnel absent comme information pu
   const result = await target.runner.run("user-a", "conversation-a", objective);
   assert.equal(result.status, "COMPLETED");
   assert.equal(target.reads.filter((path) => path === "package.json").length, 2);
+  assert.equal(target.steps.find((step) => step.summary === "Inspection déjà satisfaite")?.status, "COMPLETED");
   assert.equal(target.steps.find((step) => step.summary === "Chercher package")?.status, "FAILED");
   assert.match(String(target.steps.find((step) => step.summary === "Chercher package")?.resultSummary), /OPTIONAL FILE ABSENT/);
   assert.equal(target.steps.find((step) => step.summary === "Inspection insuffisante"), undefined);
@@ -214,15 +233,18 @@ test("repository minimal traite un fichier optionnel absent comme information pu
 test("inspection identique réussie n’est pas exécutée deux fois", async () => {
   const target = harness([
     { type: "TOOL_CALL", summary: "Lister", tool: "list_files", input: { path: "." } },
-    { type: "TOOL_CALL", summary: "Relister", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Relister 1", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Relister 2", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Relister 3", tool: "list_files", input: { path: "." } },
     { type: "TOOL_CALL", summary: "Créer", tool: "write_file", input: { path: "src/main.ts", content: "export {};" } },
+    { type: "TOOL_CALL", summary: "Relister après mutation", tool: "list_files", input: { path: "." } },
     { type: "FINAL", summary: "Terminé", report: "Création terminée." },
     { type: "FINAL", summary: "Terminé", report: "Création et Git vérifiés." },
     { type: "FINAL", summary: "Terminé", report: "Création et Git vérifiés sans commit ni push." },
   ]);
   assert.equal((await target.runner.run("user-a", "conversation-a", "Crée src/main.ts.")).status, "COMPLETED");
-  assert.deepEqual(target.lists, ["."]);
-  assert.equal(target.steps.find((step) => step.summary === "Inspection redondante refusée")?.status, "FAILED");
+  assert.deepEqual(target.lists, [".", "."]);
+  assert.equal(target.steps.filter((step) => step.summary === "Inspection déjà satisfaite").length, 3); assert.ok(target.steps.filter((step) => step.summary === "Inspection déjà satisfaite").every((step) => step.status === "COMPLETED")); assert.match(JSON.stringify(target.steps), /INSPECTION_SATISFIED.*write_file\/delete_file/);
 });
 test("mission mutative ne peut pas terminer après une simple inspection", async () => {
   const target = harness([
@@ -320,7 +342,7 @@ test("annulation empêche tout appel modèle ou outil", async () => { const targ
 test("annulation pendant un outil ne peut pas réactiver le run", async () => { const checks = [false, false, false, false, true]; const target = harness([{ type: "PLAN", summary: "plan", plan: ["status"] }, { type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }], () => checks.shift() ?? true); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "CANCELLED"); assert.equal(target.run()?.status, "CANCELLED"); });test("limite outils arrête la boucle", async () => { const decisions = [{ type: "PLAN", summary: "plan", plan: ["inspecter"] }, ...Array.from({ length: FORGE_AGENT_LIMITS.maxToolCalls + 1 }, () => ({ type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }))]; const target = harness(decisions); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.run()?.status, "FAILED"); });
 test("filesystem refuse traversal, absolu et fichiers sensibles", () => { assert.throws(() => normalizeAgentPath("../secret")); assert.throws(() => normalizeAgentPath("/etc/passwd")); assert.throws(() => normalizeAgentPath(".env")); assert.equal(normalizeAgentPath(".env.example"), ".env.example"); });
 test("command policy refuse shell, secrets, host et Git write", () => { for (const input of [{ command: "bash", args: [], cwd: "." }, { command: "node", args: ["/etc/passwd"], cwd: "." }, { command: "git", args: ["status"], cwd: "." }, { command: "npm", args: ["publish"], cwd: "." }, { command: "vercel", args: ["deploy"], cwd: "." }, { command: "env", args: [], cwd: "." }, { command: "npm", args: ["install", "--token", "provider-secret"], cwd: "." }]) assert.throws(() => normalizeAgentCommand(input)); assert.equal(normalizeAgentCommand({ command: "npm", args: ["test"], cwd: ".", timeoutMs: 999999 }).timeoutMs, 60_000); });
-test("protocole modèle borne les décisions et outils", () => { const source = fs.readFileSync("lib/forge/agent-model.ts", "utf8"); for (const type of ["PLAN", "TOOL_CALL", "FINAL", "FAIL"]) assert.match(source, new RegExp(type)); assert.doesNotMatch(source, /git_push|git_commit/); assert.match(source, /jsonMode: true/); assert.match(source, /RECOVERY/); for (const tool of ["list_files", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"]) assert.match(source, new RegExp(tool)); });
+test("protocole modèle borne les décisions et outils", () => { const source = fs.readFileSync("lib/forge/agent-model.ts", "utf8"); for (const type of ["PLAN", "TOOL_CALL", "FINAL", "FAIL"]) assert.match(source, new RegExp(type)); assert.doesNotMatch(source, /git_push|git_commit/); assert.match(source, /jsonMode: true/); assert.match(source, /RECOVERY/); assert.match(source, /INSPECTION_SATISFIED/); for (const tool of ["list_files", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"]) assert.match(source, new RegExp(tool)); });
 test("redaction supprime tokens et secrets des résumés", () => { const text = sanitizeAgentText("OPENAI_API_KEY=super-secret-value ghp_abcdefghijklmnopqrstuvwxyz https://user:password@example.com Bearer provider-token"); assert.doesNotMatch(text, /super-secret|ghp_|user:password|provider-token/); });
 test("routes agentiques exigent authenticateForge et n’exposent aucun secret", () => { for (const path of ["app/api/forge/conversations/[conversationId]/agent-runs/route.ts", "app/api/forge/conversations/[conversationId]/agent-runs/[runId]/route.ts"]) { const source = fs.readFileSync(path, "utf8"); assert.match(source, /authenticateForge\(request\)/); assert.doesNotMatch(source, /DAYTONA_API_KEY|GITHUB_APP_PRIVATE_KEY|providerRuntimeId/); } });
 test("limite étapes empêche toute boucle infinie", async () => { const target = harness(Array.from({ length: FORGE_AGENT_LIMITS.maxSteps }, () => ({ type: "PLAN", summary: "plan", plan: ["continuer"] }))); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.steps.length, FORGE_AGENT_LIMITS.maxSteps); });

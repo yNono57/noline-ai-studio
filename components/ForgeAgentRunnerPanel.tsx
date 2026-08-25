@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Play, Square } from "lucide-react";
 import { cancelForgeAgentRun, getForgeRuntimeGitDiff, getLatestForgeAgentRun, startForgeAgentRun, type ForgeAgentRunPayload } from "@/lib/forge/forge-client";
+import { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } from "@/lib/forge/agent-limits";
 import type { ForgeConversation, ForgeMessage } from "@/lib/forge/forge-store";
 
 const ACTIVE = new Set(["QUEUED", "PLANNING", "RUNNING", "VALIDATING"]);
@@ -33,7 +34,7 @@ export function ForgeAgentRunnerPanel({ conversationId, launchRequest, onLaunchR
   return <details className="mt-3 rounded-md border border-noline-orange/30 bg-noline-orange/5 p-2">
     <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 font-black text-white">Agent Forge<span className="ml-auto text-[10px] text-noline-muted">{payload?.run.status || "PRÊT"}</span></summary>
     <div className="mt-2 space-y-2">
-      <textarea value={objective} onChange={(event) => setObjective(event.target.value)} disabled={active} rows={3} maxLength={4000} className="field w-full resize-y font-mono text-xs" placeholder="Décrivez une mission bornée pour ce sandbox…" aria-label="Mission de l’agent Forge" />
+      <textarea value={objective} onChange={(event) => setObjective(event.target.value)} disabled={active} rows={3} maxLength={FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS} className="field w-full resize-y font-mono text-xs" placeholder="Décrivez une mission bornée pour ce sandbox…" aria-label="Mission de l’agent Forge" />
       <div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={launch} disabled={active || !objective.trim()} className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-md bg-noline-orange px-3 py-2 font-black text-noline-black disabled:opacity-40">{active ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Lancer Forge</button>{payload && ACTIVE.has(payload.run.status) ? <button type="button" onClick={cancel} className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2 font-black text-white"><Square className="h-4 w-4" />Annuler</button> : null}</div>
       {error ? <p role="alert" className="text-red-300">{error}</p> : null}
       {payload?.run.plan.length ? <div><p className="font-black text-white">Plan</p><ol className="mt-1 list-decimal space-y-1 pl-4">{payload.run.plan.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ol></div> : null}
