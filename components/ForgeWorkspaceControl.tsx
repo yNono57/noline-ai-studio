@@ -10,7 +10,7 @@ import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
 import { ForgeAgentRunnerPanel } from "./ForgeAgentRunnerPanel";
 
 type AgentLaunchRequest = { id: string; objective: string };
-export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange, onRuntimeChange, onConversationUpdated, onAgentPayloadChange, onAgentMessagesPersisted }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void; onRuntimeChange?: (runtime: ForgeRuntimeView | null) => void; onConversationUpdated?: (conversation: import("@/lib/forge/forge-store").ForgeConversation) => void; onAgentPayloadChange?: (payload: import("@/lib/forge/forge-client").ForgeAgentRunPayload | null) => void; onAgentMessagesPersisted?: (messages: import("@/lib/forge/forge-store").ForgeMessage[]) => void }) {
+export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange, onRuntimeChange, onConversationUpdated, onAgentPayloadChange, onAgentMessagesPersisted, onAgentLaunchSettled }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void; onRuntimeChange?: (runtime: ForgeRuntimeView | null) => void; onConversationUpdated?: (conversation: import("@/lib/forge/forge-store").ForgeConversation) => void; onAgentPayloadChange?: (payload: import("@/lib/forge/forge-client").ForgeAgentRunPayload | null) => void; onAgentMessagesPersisted?: (messages: import("@/lib/forge/forge-store").ForgeMessage[]) => void; onAgentLaunchSettled?: (submissionId: string) => void }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
   const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -90,7 +90,7 @@ export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequ
       </div>
       <p className="mt-2 text-[10px]">Les commandes et fichiers restent confinés au sandbox Daytona.</p>
       {runtime?.status === "READY" ? <ForgeRuntimeDiagnostics key={runtime.runtimeId} conversationId={conversationId} /> : null}
-      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} launchRequest={agentLaunchRequest} onLaunchRequestHandled={onAgentLaunchRequestHandled} onActiveChange={onAgentActiveChange} onConversationUpdated={onConversationUpdated} onPayloadChange={onAgentPayloadChange} onMessagesPersisted={onAgentMessagesPersisted} /> : null}
+      {runtime?.status === "READY" ? <ForgeAgentRunnerPanel key={`agent-${runtime.runtimeId}`} conversationId={conversationId} launchRequest={agentLaunchRequest} onLaunchRequestHandled={onAgentLaunchRequestHandled} onActiveChange={onAgentActiveChange} onConversationUpdated={onConversationUpdated} onPayloadChange={onAgentPayloadChange} onMessagesPersisted={onAgentMessagesPersisted} onLaunchSettled={onAgentLaunchSettled} /> : null}
     </div>
   </details>;
 }

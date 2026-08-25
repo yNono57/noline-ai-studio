@@ -35,8 +35,9 @@ test("mission agentique persiste le fil et expose ses étapes réelles sans appe
   const persisted: Array<Record<string, unknown>> = [];
   const result = await submitForgeComposer("agent", objective, {
     chat: async () => { throw new Error("chat classique appelé"); },
-    agent: () => runForgeAgentConversation({ objective }, {
+    agent: () => runForgeAgentConversation({ objective, submissionId: "11111111-1111-4111-8111-111111111111" }, {
       createMessage: async (message: Record<string, unknown>) => { const persistedMessage = { id: `message-${persisted.length + 1}`, conversation_id: "conversation-a", ...message, created_at: `2026-08-24T00:00:0${persisted.length}.000Z` }; persisted.push(persistedMessage); return persistedMessage; },
+      updateMessageMetadata: async (messageId: string, metadata: Record<string, unknown>) => { const message = persisted.find((item) => item.id === messageId); Object.assign(message as object, { metadata }); return message; },
       runAgent: () => target.runner.run("user-a", "conversation-a", objective),
     }),
   });
@@ -49,6 +50,7 @@ test("mission agentique persiste le fil et expose ses étapes réelles sans appe
   assert.ok(target.steps.some((step) => step.tool === "read_file"));
   assert.equal(persisted[0]?.role, "USER");
   assert.equal(persisted[0]?.content, objective);
+  assert.equal((persisted[0]?.metadata as Record<string, unknown>)?.forge_agent_run_id, "run-a");
   assert.equal(persisted[1]?.role, "ASSISTANT");
   assert.match(String(persisted[1]?.content), /README\.md, package\.json/);
   assert.match(String(persisted[1]?.content), /repository de validation Forge/i);

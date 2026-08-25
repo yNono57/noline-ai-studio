@@ -2,7 +2,7 @@ import "server-only";
 
 import { createForgeAgentRunner, ForgeAgentError, publicAgentRun } from "./agent-foundation";
 import { openAIForgeAgentModelProvider } from "./agent-model";
-import { cancelAgentRun, createAgentRun, getAgentRun, getLatestAgentRun, insertAgentStep, isAgentRunCancelled, listAgentSteps, updateAgentRun, updateAgentStep } from "./agent-store";
+import { cancelAgentRun, createAgentRun, getAgentRun, getLatestAgentRun, insertAgentStep, listAgentRuns, isAgentRunCancelled, listAgentSteps, updateAgentRun, updateAgentStep } from "./agent-store";
 import { forgeRuntimeService } from "./runtime-runtime";
 import { findRuntimeByWorkspace } from "./runtime-store";
 import { forgeWorkspaceService } from "./workspace-runtime";
@@ -27,4 +27,5 @@ export const forgeAgentRunner = createForgeAgentRunner({
 });
 
 export async function getForgeAgentRunView(userId: string, conversationId: string, runId?: string) { const workspace = await ownedWorkspace(userId, conversationId); const run = runId ? await getAgentRun(userId, runId) : await getLatestAgentRun(userId, conversationId); if (!run || run.conversationId !== conversationId || run.workspaceId !== workspace.workspaceId) return null; return { run: publicAgentRun(run), steps: await listAgentSteps(userId, run.runId) }; }
+export async function listForgeAgentRunViews(userId: string, conversationId: string) { const workspace = await ownedWorkspace(userId, conversationId); const runs = (await listAgentRuns(userId, conversationId)).filter((run) => run.workspaceId === workspace.workspaceId); return Promise.all(runs.map(async (run) => ({ run: publicAgentRun(run), steps: await listAgentSteps(userId, run.runId) }))); }
 export async function cancelForgeAgentRun(userId: string, conversationId: string, runId: string) { const workspace = await ownedWorkspace(userId, conversationId); const run = await getAgentRun(userId, runId); if (!run || run.conversationId !== conversationId || run.workspaceId !== workspace.workspaceId) throw new ForgeAgentError("NOT_FOUND", "Run Forge introuvable ou inaccessible."); return publicAgentRun(await cancelAgentRun(userId, runId)); }

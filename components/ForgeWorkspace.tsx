@@ -9,7 +9,7 @@ import { ForgeWorkspaceControl } from "@/components/ForgeWorkspaceControl";
 import { ForgeWorkspaceDrawer } from "@/components/ForgeWorkspaceDrawer";
 import { ForgeGitDiffPanel } from "@/components/ForgeGitDiffPanel";
 import type { ForgeRuntimeView } from "@/lib/forge/runtime-foundation";
-import { getForgeAgentActivityState, getForgeRuntimeBadge, shouldRenderPendingAgentMission, summarizeForgeDiff } from "@/lib/forge/forge-ui";
+import { buildForgeConversationTimeline, getForgeAgentActivityState, getForgeRuntimeBadge, summarizeForgeDiff } from "@/lib/forge/forge-ui";
 import { submitForgeComposer, type ForgeComposerMode } from "@/lib/forge/forge-submit";
 import { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore, type ForgeSessionRestore } from "@/lib/forge/session-restore";
 import { isForgeChatNearBottom, scrollForgeChatToLatest } from "@/lib/forge/chat-scroll";
@@ -53,7 +53,7 @@ export function ForgeWorkspace() {
   const [agentActive, setAgentActive] = useState(false);
   const [editingConversationId, setEditingConversationId] = useState("");
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
-  const [agentPayload, setAgentPayload] = useState<ForgeAgentRunPayload | null>(null);
+  const [agentPayloads, setAgentPayloads] = useState<ForgeAgentRunPayload[]>([]);
   const [pendingAgentMission, setPendingAgentMission] = useState<{ id: string; content: string; createdAt: string } | null>(null);
   const [showLatestButton, setShowLatestButton] = useState(false);
   const [restoreScrollConversationId, setRestoreScrollConversationId] = useState("");
@@ -69,6 +69,8 @@ export function ForgeWorkspace() {
   const followMessages = useRef(true);
   const syncedAgentRun = useRef("");
   const syncedAgentTerminal = useRef("");
+  const agentSubmissionInFlight = useRef(false);
+  const agentPayload = agentPayloads.at(-1) || null;
 
   const handleError = useCallback((caught: unknown) => {
     if (caught instanceof ForgeClientError && caught.status === 401) {
@@ -113,14 +115,14 @@ export function ForgeWorkspace() {
 
   useEffect(() => {
     let active = true;
-    setMessages([]); setAgentPayload(null); setPendingAgentMission(null); setContentLoadedConversationId("");
+    setMessages([]); setAgentPayloads([]); setPendingAgentMission(null); setContentLoadedConversationId("");
     setRetryMessageId(null);
     setComposerMode("chat"); setAgentLaunchRequest(null); setAgentAvailable(false); setAgentActive(false);
     followMessages.current = true; setShowLatestButton(false); syncedAgentRun.current = ""; syncedAgentTerminal.current = "";
     if (!conversationId || authBlocked) return () => { active = false; };
     setLoading(true);
     Promise.all([listForgeMessages(conversationId), getLatestForgeAgentRun(conversationId)])
-      .then(([items, agent]) => { if (active) { setMessages(items); setAgentPayload(agent.agentRun); setContentLoadedConversationId(conversationId); } })
+      .then(([items, agent]) => { if (active) { setMessages(items); setAgentPayloads(agent.agentRuns || (agent.agentRun ? [agent.agentRun] : [])); setContentLoadedConversationId(conversationId); } })
       .catch((error) => active && handleError(error))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -148,7 +150,7 @@ export function ForgeWorkspace() {
   const selectConversation = useCallback((id: string) => { restoreCandidate.current = null; followMessages.current = true; setShowLatestButton(false); setConversationId(id); if (projectId) saveForgeSessionRestore(window.localStorage, { projectId, conversationId: id }); }, [projectId]);
   const selectProject = useCallback((id: string) => { restoreCandidate.current = null; clearForgeSessionRestore(window.localStorage); setProjectId(id); }, []);
   const handleAgentPayload = useCallback((payload: ForgeAgentRunPayload | null) => {
-    setAgentPayload(payload);
+    setAgentPayloads((current) => payload ? [...new Map([...current, payload].map((item) => [item.run.runId, item])).values()].sort((a, b) => a.run.createdAt.localeCompare(b.run.createdAt) || a.run.runId.localeCompare(b.run.runId)) : current);
     if (!payload || !conversationId) return;
     const terminal = ["COMPLETED", "FAILED", "CANCELLED"].includes(payload.run.status);
     const shouldSync = syncedAgentRun.current !== payload.run.runId || (terminal && syncedAgentTerminal.current !== `${payload.run.runId}:${payload.run.status}`);
@@ -209,11 +211,11 @@ export function ForgeWorkspace() {
 
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!conversationId || !draft.trim() || working || agentActive) return;
+    if (!conversationId || !draft.trim() || working || agentActive || agentSubmissionInFlight.current) return;
     followMessages.current = true; scrollForgeChatToLatest(messagesViewport.current, "smooth");
     if (composerMode === "agent") {
       if (!agentAvailable) { setError("Un runtime Daytona READY est requis pour exécuter cette mission."); return; }
-      const objective = draft.trim(); setError(""); setNotice("Mission transmise à l’Agent Forge…");
+      const objective = draft.trim(); agentSubmissionInFlight.current = true; setError(""); setNotice("Mission transmise à l’Agent Forge…");
       submitForgeComposer(composerMode, objective, { chat: () => undefined, agent: (value) => { const id = crypto.randomUUID(); setPendingAgentMission({ id, content: value, createdAt: new Date().toISOString() }); setAgentLaunchRequest({ id, objective: value }); } });
       setDraft(""); return;
     }
@@ -236,10 +238,7 @@ export function ForgeWorkspace() {
   const visibleProjects = projects.filter((item) => item.status === projectView);
   const project = projects.find((item) => item.id === projectId);
   const conversation = conversations.find((item) => item.id === conversationId);
-  const timeline: Array<{ key: string; at: string; kind: "message"; message: ForgeMessage } | { key: string; at: string; kind: "agent"; payload: ForgeAgentRunPayload }> = messages.map((message) => ({ key: message.id, at: message.created_at, kind: "message", message }));
-  if (pendingAgentMission && shouldRenderPendingAgentMission(messages, pendingAgentMission)) timeline.push({ key: pendingAgentMission.id, at: pendingAgentMission.createdAt, kind: "message", message: { id: pendingAgentMission.id, conversation_id: conversationId, role: "USER", content: pendingAgentMission.content, metadata: { pending: true, forge_agent_mission: true }, created_at: pendingAgentMission.createdAt } });
-  if (agentPayload) timeline.push({ key: `agent-${agentPayload.run.runId}`, at: agentPayload.run.createdAt, kind: "agent", payload: agentPayload });
-  timeline.sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
+  const timeline = buildForgeConversationTimeline(messages, agentPayloads, pendingAgentMission, conversationId);
 
   const runtimeBadge = getForgeRuntimeBadge(runtimeView?.status);
   const runtimeStatus = runtimeBadge.label;
@@ -278,7 +277,7 @@ export function ForgeWorkspace() {
 
       <ForgeWorkspaceDrawer open={workspaceOpen} title={conversation?.title || project?.name || "Forge"} onClose={() => setWorkspaceOpen(false)}>
         <section id="forge-workspace-source" className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><div className="flex items-center gap-2"><Github className="h-4 w-4 text-noline-orange" /><h3 className="text-xs font-black uppercase tracking-wide text-white">Source</h3></div><div className="mt-3 space-y-2 text-xs text-noline-muted"><p className="truncate">Repository · {project?.repository_identifier || "Non connecté"}</p><p className="truncate">Branche · {project?.default_branch || "Non connectée"}</p><p>Contexte · {(contextByConversation[conversationId] || []).length} fichier(s)</p><p>GitHub · lecture seule</p></div></section>
-        <ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} onRuntimeChange={setRuntimeView} onConversationUpdated={(updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))} onAgentPayloadChange={handleAgentPayload} onAgentMessagesPersisted={(persisted) => { setMessages((current) => mergeMessages(current, persisted)); setPendingAgentMission(null); }} />
+        <ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} onRuntimeChange={setRuntimeView} onConversationUpdated={(updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))} onAgentPayloadChange={handleAgentPayload} onAgentMessagesPersisted={(persisted) => { setMessages((current) => mergeMessages(current, persisted)); setPendingAgentMission(null); }} onAgentLaunchSettled={() => { agentSubmissionInFlight.current = false; }} />
         <ForgeGitDiffPanel conversationId={conversationId} active={workspaceOpen && workspaceSection === "git" && runtimeReady} />
         <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3" open={workspaceSection === "source"}><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-black text-white"><Menu className="h-4 w-4 text-noline-orange" />Files & contexte</summary><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></details>
       </ForgeWorkspaceDrawer>
