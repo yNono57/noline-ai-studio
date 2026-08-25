@@ -91,7 +91,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let prematureTerminations = 0;
     let inspectionSatisfied = false;
     let minimalRepositoryConfirmed = false;
-    let packageScripts: Set<string> | null = null;
+    let packageScripts: Map<string, string> | null = null;
+    const successfulPackageValidations = new Set<string>();
     let validationRecovery: ForgeValidationRecovery | null = null;
     let lastPrematureProgressKey: string | null = null;
     let prematureWithoutProgress = 0;
@@ -127,7 +128,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           const previousCommandFailure = commandKey ? failedValidationCommands.get(commandKey) : undefined;
           if (commandKey && previousCommandFailure?.mutationVersion === mutationVersion) {
             stalledDecisions += 1;
-            const remaining = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded });
+            const remaining = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded }, packageScripts, successfulPackageValidations);
             const recovery = sanitizeAgentText(`COMMAND_RETRY_BLOCKED: la même commande a déjà échoué sans mutation depuis. ${previousCommandFailure.resultSummary} filesystemRevision=${inspectionRevision}; mutationRevision=${mutationVersion}; completionGates=${remaining.join("; ") || "aucune"}. Retry identique interdit avant progression. Actions autorisées: read_file, list_files, write_file, delete_file, ou une commande différente justifiée.`, 3000);
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Validation identique suspendue", tool: decision.tool, input: safeInput, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
             if (stalledDecisions >= 4) throw new ForgeAgentError("MODEL", "Le modèle Forge répète une validation en échec sans corriger le projet.");
@@ -138,7 +139,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             stalledDecisions += 1;
             validationAttempted = true;
             validationFailed = true;
-            const available = [...packageScripts].sort();
+            const available = [...packageScripts.keys()].sort();
             const recovery = sanitizeAgentText(`NPM_SCRIPT_UNAVAILABLE: le script ${requestedNpmScript} n'existe pas dans package.json. Scripts observés: ${available.length ? available.join(", ") : "aucun"}. Aucun appel runtime effectué. Crée/corrige le script demandé avec write_file ou utilise une validation réellement disponible; ne répète pas cette commande sans mutation. mutationRevision=${mutationVersion}.`, 2200);
             if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: recovery });
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Script npm indisponible", tool: decision.tool, input: safeInput, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
@@ -149,7 +150,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           if (previousFailures >= 2) throw new ForgeAgentError("MODEL", "Le modèle Forge répète un appel d’outil invalide sans le corriger.");
           if ((decision.tool === "list_files" || decision.tool === "read_file") && (successfulInspections.has(inspectionSignature) || knownMissingInspections.has(inspectionSignature))) {
             stalledDecisions += 1;
-            const remaining = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded });
+            const remaining = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded }, packageScripts, successfulPackageValidations);
             const duplicateMessage = sanitizeAgentText(`INSPECTION_SATISFIED: ${decision.tool} ${String(safeInput.path ?? ".")} est déjà satisfait pour la version filesystem courante. Aucun appel runtime supplémentaire. Completion gates restantes: ${remaining.length ? remaining.join("; ") : "aucune; choisis une inspection différente justifiée ou FINAL"}. Prochaine décision: TOOL_CALL faisant progresser la première gate restante.`, 1800);
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Inspection déjà satisfaite", tool: decision.tool, input: safeInput, resultSummary: duplicateMessage, status: "COMPLETED", startedAt: now, completedAt: now }));
             if (stalledDecisions >= 4) throw new ForgeAgentError("MODEL", "Le modèle Forge ne progresse pas après quatre récupérations structurées.");
@@ -187,8 +188,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               stalledDecisions = 0;
               prematureTerminations = 0;
               if (commandKey) failedValidationCommands.delete(commandKey);
-              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
-              if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && validationRecovery && (mutationVersion > validationRecovery.failureMutationVersion || validationRecovery.failureKind === "COMMAND_CWD")) validationRecovery = null; }
+              if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; successfulPackageValidations.clear(); if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
+              if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && requestedNpmScript && availablePackageValidations(packageScripts).has(requestedNpmScript)) successfulPackageValidations.add(requestedNpmScript); if (validation && validationRecovery && (mutationVersion > validationRecovery.failureMutationVersion || validationRecovery.failureKind === "COMMAND_CWD")) validationRecovery = null; }
               if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(inspectionSignature); inspectionSatisfied = true; }
               if (validationRecovery && decision.tool === "list_files") validationRecovery.inspectionsSinceFailure.add(normalizeAgentPath(decision.input.path ?? ".", true));
               if (validationRecovery && decision.tool === "read_file") { const path = normalizeAgentPath(decision.input.path); validationRecovery.inspectionsSinceFailure.add(path); validationRecovery.filesReadSinceFailure.add(path); }
@@ -233,7 +234,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse d’utiliser les outils après trois demandes de récupération.");
             continue;
           }
-          const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed });
+          const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed }, packageScripts, successfulPackageValidations);
           const validationRecoveryMissing = validationRecoveryRequirements(validationRecovery);
           if (missingRequirements.length || validationRecoveryMissing.length) {
             prematureTerminations += 1;
@@ -275,7 +276,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now });
           return deps.updateRun(userId, run.runId, { status: "COMPLETED", finalReport: report, completedAt: deps.now(), lastActivityAt: deps.now() });
         }
-        const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed });
+        const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed }, packageScripts, successfulPackageValidations);
         const validationRecoveryMissing = validationRecoveryRequirements(validationRecovery);
         if (successfulToolCalls === 0 || ((missingRequirements.length || validationRecoveryMissing.length) && blockingToolFailures === 0)) {
           prematureTerminations += 1;
@@ -345,16 +346,17 @@ function startupRecoveryMessage(attempt: number, modelError?: string, lastRecove
   const toolFailure = lastRecoverableFailure ? `Dernier échec récupérable: ${sanitizeAgentText(lastRecoverableFailure, 900)} ` : "";
   return sanitizeAgentText(`${reason}${toolFailure}RECOVERY ${attempt}/3: aucun outil n’a encore réussi. La prochaine décision doit être un TOOL_CALL valide. Outils disponibles: list_files, read_file, write_file, delete_file, run_command, git_status, git_diff. Commence normalement par list_files {"path":"."}, puis inspecte les fichiers nécessaires. run_command exige un exécutable simple et des args séparés; aucun shell composé.`, 1600);
 }
-function getMissingCompletionRequirements(requirements: ForgeMissionRequirements, state: { mutationOccurred: boolean; validationAttempted: boolean; validationFailed: boolean }) {
+function getMissingCompletionRequirements(requirements: ForgeMissionRequirements, state: { mutationOccurred: boolean; validationAttempted: boolean; validationFailed: boolean }, packageScripts: Map<string, string> | null = null, successfulPackageValidations: Set<string> = new Set()) {
   const missing: string[] = [];
   if (requirements.mutation && !state.mutationOccurred) missing.push("créer ou modifier les fichiers demandés avec write_file/delete_file");
   if (requirements.validation && !state.validationAttempted) missing.push("lancer la validation demandée avec run_command et input.validation=true");
   if (requirements.validation && state.validationAttempted && state.validationFailed) missing.push("corriger l’échec puis relancer la validation avec succès");
+  for (const script of availablePackageValidations(packageScripts)) if (!successfulPackageValidations.has(script)) missing.push(`exécuter npm run ${script} avec validation=true et obtenir exitCode 0`);
   return missing;
 }
-function remainingCompletionActions(requirements: ForgeMissionRequirements, state: { mutationOccurred: boolean; validationAttempted: boolean; validationFailed: boolean; gitStatusSucceeded: boolean; gitDiffSucceeded: boolean }) {
+function remainingCompletionActions(requirements: ForgeMissionRequirements, state: { mutationOccurred: boolean; validationAttempted: boolean; validationFailed: boolean; gitStatusSucceeded: boolean; gitDiffSucceeded: boolean }, packageScripts: Map<string, string> | null = null, successfulPackageValidations: Set<string> = new Set()) {
   return [
-    ...getMissingCompletionRequirements(requirements, state),
+    ...getMissingCompletionRequirements(requirements, state, packageScripts, successfulPackageValidations),
     requirements.gitStatus && !state.gitStatusSucceeded ? "exécuter git_status" : "",
     requirements.gitDiff && !state.gitDiffSucceeded ? "exécuter git_diff" : "",
   ].filter(Boolean);
@@ -444,9 +446,20 @@ function npmScriptName(input: Record<string, unknown>) {
 function parsePackageScripts(content: string) {
   try {
     const parsed = JSON.parse(content) as { scripts?: unknown };
-    if (!parsed.scripts || typeof parsed.scripts !== "object" || Array.isArray(parsed.scripts)) return new Set<string>();
-    return new Set(Object.entries(parsed.scripts).filter((entry) => typeof entry[1] === "string").map((entry) => entry[0]));
+    if (!parsed.scripts || typeof parsed.scripts !== "object" || Array.isArray(parsed.scripts)) return new Map<string, string>();
+    return new Map(Object.entries(parsed.scripts).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   } catch { return null; }
+}
+function availablePackageValidations(packageScripts: Map<string, string> | null) {
+  const available = new Set<string>();
+  if (!packageScripts) return available;
+  for (const script of ["typecheck", "lint", "test", "build"]) {
+    const command = packageScripts.get(script);
+    if (!command) continue;
+    if (script === "test" && /echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1/i.test(command)) continue;
+    available.add(script);
+  }
+  return available;
 }
 function commandFailureRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number, repositoryPackageObserved: boolean) {
   const safe = safeToolInput("run_command", input);

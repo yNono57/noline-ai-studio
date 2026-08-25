@@ -91,8 +91,9 @@ test("restauration du fil attend messages et AgentRun avant de cibler la convers
 test("mission Production démarre par un PLAN serveur puis lit réellement package.json", async () => {
   const target = harness([
     { type: "TOOL_CALL", summary: "Lire package.json", tool: "read_file", input: { path: "package.json" } },
-    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /noline-forge-testbed/); return { type: "FINAL", summary: "Projet identifié", report: "Le projet est noline-forge-testbed." }; },
-  ]);
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /noline-forge-testbed/); return { type: "TOOL_CALL", summary: "Build disponible", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } }; },
+    { type: "FINAL", summary: "Projet identifié", report: "Le projet est noline-forge-testbed et son build disponible a réussi." },
+  ], false, { commandResults: [{ stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }] });
   const result = await submitForgeComposer("agent", "Inspecte package.json et indique le nom du projet.", { chat: async () => { throw new Error("chat classique appelé"); }, agent: (objective: string) => target.runner.run("user-a", "conversation-a", objective) });
   assert.equal(result.status, "COMPLETED"); assert.equal(target.steps[0]?.type, "PLAN"); assert.equal(target.steps[0]?.status, "COMPLETED"); assert.deepEqual(target.reads, ["package.json"]); assert.equal(target.run()?.objective, "Inspecte package.json et indique le nom du projet."); assert.match(String(target.run()?.finalReport), /noline-forge-testbed/); assert.doesNotMatch(String(target.run()?.finalReport), /pas accès|fournir.*package\.json/i);
 });
@@ -438,7 +439,7 @@ test("list_files normalise src slash terminal et la persistance ordonne recovery
     { type: "FINAL", summary: "Terminé", report: "Source créée et testée." },
     { type: "FINAL", summary: "Terminé", report: "Source créée, testée et Git status vérifié." },
     { type: "FINAL", summary: "Terminé", report: "Source créée, testée; Git status et Git diff réels vérifiés." },
-  ], false, { commandResults: [{ stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }] });
+  ], false, { files: { "package.json": '{"scripts":{}}' }, commandResults: [{ stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }] });
   const result = await target.runner.run("user-a", "conversation-a", "Inspecte puis crée la source, lance les tests et vérifie Git status et Git diff.");
   assert.equal(result.status, "COMPLETED");
   assert.equal(target.runCreates(), 1);
@@ -558,16 +559,17 @@ test("script npm absent observé dans package.json ne déclenche aucun retry run
     lint,
     (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /NPM_SCRIPT_UNAVAILABLE/); assert.match(history, /Scripts observés: build/); return { type: "TOOL_CALL", summary: "Ajouter lint", tool: "write_file", input: { path: "package.json", content: '{"scripts":{"build":"vite build","lint":"eslint ."}}' } }; },
     lint,
-    { type: "FINAL", summary: "Terminé", report: "Script lint ajouté et validation réussie." },
+    { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Scripts lint et build validés." },
     { type: "FINAL", summary: "Terminé", report: "Script lint ajouté, validation et Git status réussis." },
     { type: "FINAL", summary: "Terminé", report: "Script lint ajouté, validation, Git status et Git diff réussis sans commit ni push." },
   ], false, {
     files: { "package.json": '{"scripts":{"build":"vite build"}}' },
-    commandResults: [{ stdout: "lint PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 }],
+    commandResults: [{ stdout: "lint PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 }, { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 }],
   });
   const result = await target.runner.run("user-a", "conversation-a", "Ajoute un script lint, exécute la validation puis vérifie Git status et Git diff.");
   assert.equal(result.status, "COMPLETED");
-  assert.equal(target.commands.length, 1);
+  assert.equal(target.commands.length, 2);
   assert.match(String(target.steps.find((step) => step.summary === "Script npm indisponible")?.resultSummary), /NPM_SCRIPT_UNAVAILABLE/);
   assert.match(String(target.steps.find((step) => step.summary === "Validation identique suspendue")?.resultSummary), /COMMAND_RETRY_BLOCKED/);
 });
@@ -666,4 +668,70 @@ test("ENOENT du cwd Daytona ne transforme pas package.json repository en fichier
   assert.deepEqual(target.reads, ["package.json"]);
   assert.equal(target.writes.includes("package.json"), false);
   assert.equal(target.commands.length, 2);
+});
+
+
+test("completion gate: build disponible et réussi autorise COMPLETED sans inventer typecheck", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Build réellement exécuté avec succès." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build"}}' },
+    commandResults: [{ stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }],
+  });
+  assert.equal((await target.runner.run("user-a", "conversation-a", "Inspecte package.json puis finalise.")).status, "COMPLETED");
+  assert.deepEqual(target.commands.map((command) => command.args), [["run", "build"]]);
+  assert.doesNotMatch(JSON.stringify(target.steps), /npm run typecheck/);
+});
+
+test("completion gate: build réussi ne remplace pas lint disponible, puis les deux autorisent COMPLETED", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Trop tôt", report: "Build réussi." },
+    (context: Record<string, unknown>) => {
+      assert.match(JSON.stringify(context), /exécuter npm run lint.*exitCode 0/);
+      return { type: "TOOL_CALL", summary: "Lint", tool: "run_command", input: { command: "npm", args: ["run", "lint"], cwd: ".", validation: true } };
+    },
+    { type: "FINAL", summary: "Terminé", report: "Build et lint réellement exécutés avec succès." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build","lint":"eslint ."}}' },
+    commandResults: [
+      { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 },
+      { stdout: "lint PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 },
+    ],
+  });
+  assert.equal((await target.runner.run("user-a", "conversation-a", "Inspecte package.json puis finalise.")).status, "COMPLETED");
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 1);
+  assert.deepEqual(target.commands.map((command) => command.args), [["run", "build"], ["run", "lint"]]);
+});
+
+test("completion gate: placeholder npm test standard est ignoré", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Build disponible exécuté avec succès; test placeholder ignoré." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build","test":"echo \\"Error: no test specified\\" && exit 1"}}' },
+    commandResults: [{ stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }],
+  });
+  assert.equal((await target.runner.run("user-a", "conversation-a", "Inspecte package.json puis finalise.")).status, "COMPLETED");
+  assert.deepEqual(target.commands.map((command) => command.args), [["run", "build"]]);
+});
+
+test("completion gate: texte Build completed avec exitCode non nul reste un échec réel", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    build,
+    { type: "FINAL", summary: "Trop tôt", report: "Build completed." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build"}}' },
+    commandResults: [{ stdout: "Build completed", stderr: "fatal build error", exitCode: 1, timedOut: false, truncated: false, durationMs: 4 }],
+  });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Inspecte package.json puis lance le build."), /missing decision/);
+  assert.equal(target.steps.find((step) => step.summary === "Build")?.status, "FAILED");
+  assert.match(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /exited 1/);
+  assert.notEqual(target.run()?.status, "COMPLETED");
 });
