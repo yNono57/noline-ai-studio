@@ -55,6 +55,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let run = await deps.createRun({ userId, projectId: context.projectId, conversationId, workspaceId: context.workspaceId, runtimeId: context.runtimeId, status: "QUEUED", objective, baseCommitSha: context.baseCommitSha, plan: [], finalReport: null, startedAt: null, completedAt: null, lastActivityAt: null, error: null });
     const steps: ForgeAgentStep[] = [];
     const failedCalls = new Map<string, number>();
+    const failedValidationCommands = new Map<string, { mutationVersion: number; resultSummary: string }>();
     const successfulInspections = new Set<string>();
     const knownMissingInspections = new Set<string>();
     let toolCalls = 0;
@@ -72,6 +73,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let prematureTerminations = 0;
     let inspectionSatisfied = false;
     let minimalRepositoryConfirmed = false;
+    let packageScripts: Set<string> | null = null;
     try {
       run = await deps.updateRun(userId, run.runId, { status: "PLANNING", startedAt: deps.now(), lastActivityAt: deps.now() });
       if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
@@ -98,6 +100,28 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           const safeInput = safeToolInput(decision.tool, decision.input);
           const signature = `${mutationVersion}:${decision.tool}:${JSON.stringify(safeInput)}`;
           const inspectionSignature = `${inspectionRevision}:${decision.tool}:${JSON.stringify(safeInput)}`;
+          const commandKey = decision.tool === "run_command" ? JSON.stringify({ command: safeInput.command, args: safeInput.args, cwd: safeInput.cwd, validation: safeInput.validation }) : null;
+          const previousCommandFailure = commandKey ? failedValidationCommands.get(commandKey) : undefined;
+          if (commandKey && previousCommandFailure?.mutationVersion === mutationVersion) {
+            stalledDecisions += 1;
+            const remaining = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded });
+            const recovery = sanitizeAgentText(`COMMAND_RETRY_BLOCKED: la même commande a déjà échoué sans mutation depuis. ${previousCommandFailure.resultSummary} filesystemRevision=${inspectionRevision}; mutationRevision=${mutationVersion}; completionGates=${remaining.join("; ") || "aucune"}. Retry identique interdit avant progression. Actions autorisées: read_file, list_files, write_file, delete_file, ou une commande différente justifiée.`, 3000);
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Validation identique suspendue", tool: decision.tool, input: safeInput, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
+            if (stalledDecisions >= 4) throw new ForgeAgentError("MODEL", "Le modèle Forge répète une validation en échec sans corriger le projet.");
+            continue;
+          }
+          const requestedNpmScript = npmScriptName(safeInput);
+          if (requestedNpmScript && packageScripts && !packageScripts.has(requestedNpmScript)) {
+            stalledDecisions += 1;
+            validationAttempted = true;
+            validationFailed = true;
+            const available = [...packageScripts].sort();
+            const recovery = sanitizeAgentText(`NPM_SCRIPT_UNAVAILABLE: le script ${requestedNpmScript} n'existe pas dans package.json. Scripts observés: ${available.length ? available.join(", ") : "aucun"}. Aucun appel runtime effectué. Crée/corrige le script demandé avec write_file ou utilise une validation réellement disponible; ne répète pas cette commande sans mutation. mutationRevision=${mutationVersion}.`, 2200);
+            if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: recovery });
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Script npm indisponible", tool: decision.tool, input: safeInput, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
+            if (stalledDecisions >= 4) throw new ForgeAgentError("MODEL", "Le modèle Forge répète une validation indisponible sans corriger package.json.");
+            continue;
+          }
           const previousFailures = failedCalls.get(signature) || 0;
           if (previousFailures >= 2) throw new ForgeAgentError("MODEL", "Le modèle Forge répète un appel d’outil invalide sans le corriger.");
           if ((decision.tool === "list_files" || decision.tool === "read_file") && (successfulInspections.has(inspectionSignature) || knownMissingInspections.has(inspectionSignature))) {
@@ -122,24 +146,33 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             const result = await executeTool(deps.runtime(userId, conversationId), decision.tool, decision.input);
             const commandFailed = decision.tool === "run_command" && ((result as ForgeRuntimeCommandResult).timedOut || (result as ForgeRuntimeCommandResult).exitCode !== 0);
             if (validation) validationFailed = commandFailed;
-            const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(decision.tool, result, false, decision.input), status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() });
+            const persistedSummary = summarizeToolResult(decision.tool, result, false, decision.input);
+            const modelSummary = commandFailed
+              ? commandFailureRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion)
+              : summarizeToolResult(decision.tool, result, true, decision.input);
+            const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: persistedSummary, status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() });
             if (decision.tool === "run_command") inspectionRevision += 1;
             if (commandFailed) {
-              failedCalls.set(signature, 1);
-              lastRecoverableFailure = summarizeToolResult(decision.tool, result, true, decision.input);
+              stalledDecisions = 0;
+              prematureTerminations = 0;
+              if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: modelSummary });
+              lastRecoverableFailure = modelSummary;
             }
             else {
               successfulToolCalls += 1;
               stalledDecisions = 0;
               prematureTerminations = 0;
+              if (commandKey) failedValidationCommands.delete(commandKey);
               if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
               if (decision.tool === "run_command") lastRecoverableFailure = null;
               if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(inspectionSignature); inspectionSatisfied = true; }
               if (decision.tool === "list_files" && normalizeAgentPath(decision.input.path ?? ".", true) === ".") minimalRepositoryConfirmed = isMinimalRepositoryListing(result);
+              if (decision.tool === "read_file" && normalizeAgentPath(decision.input.path) === "package.json") packageScripts = parsePackageScripts((result as ForgeRuntimeFile).content);
+              if (decision.tool === "write_file" && normalizeAgentPath(decision.input.path) === "package.json" && typeof decision.input.content === "string") packageScripts = parsePackageScripts(decision.input.content);
               if (decision.tool === "git_status") gitStatusSucceeded = true;
               if (decision.tool === "git_diff") gitDiffSucceeded = true;
             }
-            steps.push({ ...persisted, resultSummary: summarizeToolResult(decision.tool, result, true, decision.input) });
+            steps.push({ ...persisted, resultSummary: modelSummary });
             if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
             run = await deps.updateRun(userId, run.runId, { status: validation ? "VALIDATING" : "RUNNING", lastActivityAt: deps.now() });
           } catch (error) {
@@ -155,7 +188,9 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             const code = getErrorCode(error);
             const actionable = missingOptionalFile
               ? sanitizeAgentText(`OPTIONAL FILE ABSENT: ${reason} Cette absence est une information d'inspection, pas un blocker runtime. N'essaie pas de relire ce chemin; poursuis avec la prochaine obligation.`, 1400)
-              : sanitizeAgentText(`TOOL ERROR [${code}] tool=${decision.tool} input=${JSON.stringify(safeInput)}: ${reason} Prochaine action: corrige cet input ou utilise un autre outil autorisé; git_status/git_diff sont des outils dédiés.`, 1800);
+              : decision.tool === "run_command" && code === "INVALID_INPUT"
+                ? sanitizeAgentText(`TOOL ERROR [INVALID_INPUT] tool=run_command input=${JSON.stringify(safeInput)}: ${reason} RUN_COMMAND_CONTRACT: command doit être un exécutable simple; args un tableau séparé; cwd un chemin relatif; aucun &&, pipe ou redirection. Corrige l'input avant le prochain TOOL_CALL.`, 2200)
+                : sanitizeAgentText(`TOOL ERROR [${code}] tool=${decision.tool} input=${JSON.stringify(safeInput)}: ${reason} Prochaine action: corrige cet input ou utilise un autre outil autorisé; git_status/git_diff sont des outils dédiés.`, 1800);
             if (!missingOptionalFile && !isBlockingToolError(error)) lastRecoverableFailure = actionable;
             const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: actionable, status: "FAILED", completedAt: deps.now() });
             steps.push({ ...failed, resultSummary: actionable });
@@ -264,6 +299,24 @@ function isMinimalRepositoryListing(result: unknown) {
   if (!Array.isArray(result)) return false;
   const visibleEntries = result.filter((entry) => typeof entry === "object" && entry !== null && (entry as { path?: unknown }).path !== ".git");
   return visibleEntries.length <= 4;
+}
+
+function npmScriptName(input: Record<string, unknown>) {
+  if (input.command !== "npm" || !Array.isArray(input.args) || input.args[0] !== "run" || typeof input.args[1] !== "string") return null;
+  return input.args[1];
+}
+function parsePackageScripts(content: string) {
+  try {
+    const parsed = JSON.parse(content) as { scripts?: unknown };
+    if (!parsed.scripts || typeof parsed.scripts !== "object" || Array.isArray(parsed.scripts)) return new Set<string>();
+    return new Set(Object.entries(parsed.scripts).filter((entry) => typeof entry[1] === "string").map((entry) => entry[0]));
+  } catch { return null; }
+}
+function commandFailureRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number) {
+  const safe = safeToolInput("run_command", input);
+  const stdout = sanitizeAgentText(result.stdout || "", 3500);
+  const stderr = sanitizeAgentText(result.stderr || "", 3500);
+  return sanitizeAgentText(`COMMAND_EXECUTED_NONZERO: tool=run_command command=${String(safe.command || "")} args=${JSON.stringify(safe.args || [])} cwd=${String(safe.cwd || ".")} exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${stdout || "(vide)"} stderr=${stderr || "(vide)"} filesystemRevision=${filesystemRevision} mutationRevision=${mutationRevision}. La commande était valide et a réellement été exécutée; ce n'est pas un input invalide ni un blocker provider. Analyse les sorties, inspecte les fichiers concernés puis corrige avec write_file/delete_file. Un retry identique est interdit avant mutation.`, 8000);
 }
 async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); const path = normalizeAgentPath(input.path); const written = await runtime.writeFile(path, input.content); const verified = await runtime.readFile(path); if (verified.content !== input.content) throw new ForgeAgentError("PERSISTENCE", "Le contenu relu ne correspond pas exactement au contenu écrit."); return written; } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }
 function safeCommandArgs(value: unknown) { if (!Array.isArray(value)) return []; let redactNext = false; return value.slice(0, 24).map((item) => { if (redactNext) { redactNext = false; return "[REDACTED]"; } const text = String(item); if (/^--?(?:token|secret|password|api[-_]?key|_authToken)$/i.test(text)) { redactNext = true; return "[REDACTED]"; } return sanitizeAgentText(text, 240).replace(/(?:token|secret|password|api[-_]?key)=?\S*/gi, "[REDACTED]"); }); }

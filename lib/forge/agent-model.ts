@@ -14,6 +14,8 @@ PLAN: {"type":"PLAN","summary":"...","plan":["..."]}
 TOOL_CALL: {"type":"TOOL_CALL","summary":"...","tool":"read_file","input":{"path":"..."}}
 Pour run_command, command est uniquement le nom de l'exécutable (ex: "npm") et args est un tableau séparé (ex: ["test"]). N'utilise jamais &&, pipes, redirections ou une commande shell composée.
 Pour vérifier Git, utilise exclusivement deux TOOL_CALL distincts: git_status avec input {}, puis git_diff avec input {}. N'utilise pas run_command pour Git.
+Pour une commande valide avec exitCode non nul, analyse stdout/stderr puis inspecte et corrige les fichiers; ne la traite jamais comme un input invalide. Si le contexte contient COMMAND_RETRY_BLOCKED, n'appelle pas la même commande avant une mutation réelle.
+Si package.json a été lu, utilise uniquement les scripts npm observés. Si NPM_SCRIPT_UNAVAILABLE apparaît, corrige package.json ou choisis un script réellement disponible avant toute nouvelle validation.
 Après write_file, le runner relit et vérifie automatiquement le contenu exact. Après toute mutation, git_status et git_diff doivent réussir avant FINAL.
 Les obligations de l'objectif restent autoritaires: une mission de création/modification exige une mutation réelle; une validation demandée exige un run_command marqué validation=true et réussi. Un repository vide ou minimal n'est pas un blocker si l'objectif demande de créer le projet.
 Quand RECOVERY confirme un repository minimal ou OPTIONAL FILE ABSENT, ne répète pas l'inspection: passe à la prochaine obligation avec write_file ou run_command selon le besoin.

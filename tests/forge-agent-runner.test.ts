@@ -19,7 +19,7 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed","scripts":{"build":"vite build"}}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
   return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, commands, writes, reads, lists, contexts, files };
@@ -358,7 +358,7 @@ test("repository minimal récupère npm en échec puis initialise, relit, valide
     { type: "TOOL_CALL", summary: "Inspecter", tool: "list_files", input: { path: "." } },
     { type: "TOOL_CALL", summary: "Lire README", tool: "read_file", input: { path: "README.md" } },
     { type: "TOOL_CALL", summary: "Installer", tool: "run_command", input: { command: "npm", args: ["install"], cwd: "." } },
-    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /npm install exited 1/); assert.match(history, /registry temporairement indisponible/); assert.match(history, /"args":\["install"\]/); return { type: "TOOL_CALL", summary: "Relister après npm", tool: "list_files", input: { path: "." } }; },
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /COMMAND_EXECUTED_NONZERO.*command=npm.*args=.*install.*exitCode=1/); assert.match(history, /registry temporairement indisponible/); assert.match(history, /"args":\["install"\]/); return { type: "TOOL_CALL", summary: "Relister après npm", tool: "list_files", input: { path: "." } }; },
     { type: "TOOL_CALL", summary: "Relire après npm", tool: "read_file", input: { path: "README.md" } },
     { type: "TOOL_CALL", summary: "Créer package", tool: "write_file", input: { path: "package.json", content: '{"scripts":{"build":"tsc"}}' } },
     { type: "TOOL_CALL", summary: "Créer index", tool: "write_file", input: { path: "index.html", content: "<main id=app></main>" } },
@@ -501,4 +501,83 @@ test("budget Forge reste borné à 60 étapes, 48 outils et contraintes SQL alig
   assert.match(sql, /drop constraint if exists forge_agent_steps_step_number_check/i);
   assert.match(sql, /step_number between 1 and 60/i);
   assert.doesNotMatch(sql, /drop table|truncate/i);
+});
+
+
+test("validation npm non nulle bloque le retry aveugle puis autorise le retry après correction", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Créer application", tool: "write_file", input: { path: "src/App.tsx", content: "export default () => <main>draft</main>" } },
+    build,
+    build,
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /COMMAND_RETRY_BLOCKED/); assert.match(history, /exitCode=1/); assert.match(history, /TypeScript error/); assert.match(history, /mutationRevision=1/); return { type: "TOOL_CALL", summary: "Lire source en erreur", tool: "read_file", input: { path: "src/App.tsx" } }; },
+    { type: "TOOL_CALL", summary: "Corriger application", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } },
+    build,
+    { type: "FINAL", summary: "Terminé", report: "Application corrigée et build réussi." },
+    { type: "FINAL", summary: "Terminé", report: "Application corrigée, build réussi et Git status vérifié." },
+    { type: "FINAL", summary: "Terminé", report: "Application corrigée, build réussi, Git status et Git diff réels vérifiés sans commit ni push." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build"}}' },
+    commandResults: [
+      { stdout: "vite build", stderr: "src/App.tsx: TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 10 },
+      { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 9 },
+    ],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Inspecte puis crée l’application, lance le build, corrige les erreurs et vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands.length, 2);
+  assert.match(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /npm run build exited 1/);
+  assert.doesNotMatch(String(target.steps.find((step) => step.summary === "Build")?.resultSummary), /TOOL ERROR|input invalide/i);
+  assert.match(String(target.steps.find((step) => step.summary === "Validation identique suspendue")?.resultSummary), /COMMAND_RETRY_BLOCKED/);
+  assert.equal(target.steps.filter((step) => step.summary === "Validation identique suspendue").length, 1);
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 0);
+  assert.equal(target.steps.findLast((step) => step.summary === "Build")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.ok(target.steps.length < 60);
+  assert.doesNotMatch(JSON.stringify(target.steps), /git_add|git_commit|git_push/);
+});
+
+test("script npm absent observé dans package.json ne déclenche aucun retry runtime aveugle", async () => {
+  const lint = { type: "TOOL_CALL", summary: "Lint", tool: "run_command", input: { command: "npm", args: ["run", "lint"], cwd: ".", validation: true } };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    lint,
+    lint,
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /NPM_SCRIPT_UNAVAILABLE/); assert.match(history, /Scripts observés: build/); return { type: "TOOL_CALL", summary: "Ajouter lint", tool: "write_file", input: { path: "package.json", content: '{"scripts":{"build":"vite build","lint":"eslint ."}}' } }; },
+    lint,
+    { type: "FINAL", summary: "Terminé", report: "Script lint ajouté et validation réussie." },
+    { type: "FINAL", summary: "Terminé", report: "Script lint ajouté, validation et Git status réussis." },
+    { type: "FINAL", summary: "Terminé", report: "Script lint ajouté, validation, Git status et Git diff réussis sans commit ni push." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build"}}' },
+    commandResults: [{ stdout: "lint PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 }],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Ajoute un script lint, exécute la validation puis vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands.length, 1);
+  assert.match(String(target.steps.find((step) => step.summary === "Script npm indisponible")?.resultSummary), /NPM_SCRIPT_UNAVAILABLE/);
+  assert.match(String(target.steps.find((step) => step.summary === "Validation identique suspendue")?.resultSummary), /COMMAND_RETRY_BLOCKED/);
+});
+
+test("quatre retries npm identiques sans mutation restent stoppés rapidement", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build répété", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const target = harness(Array.from({ length: 6 }, () => build), false, { commandResults: [{ stdout: "", stderr: "build error", exitCode: 1, timedOut: false, truncated: false, durationMs: 6 }] });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Lance le build et corrige les erreurs."), /répète une validation en échec sans corriger/);
+  assert.equal(target.commands.length, 1);
+  assert.equal(target.steps.filter((step) => step.summary === "Validation identique suspendue").length, 4);
+  assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
+});
+
+test("run_command invalide conserve un recovery de protocole précis", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Commande invalide", tool: "run_command", input: { command: "npm run build && npm test", args: [], cwd: ".", validation: true } },
+    { type: "TOOL_CALL", summary: "Commande corrigée", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Validation exécutée." },
+  ], false, { commandResults: [{ stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 5 }] });
+  const result = await target.runner.run("user-a", "conversation-a", "Lance le build.");
+  assert.equal(result.status, "COMPLETED");
+  assert.match(String(target.steps.find((step) => step.summary === "Commande invalide")?.resultSummary), /RUN_COMMAND_CONTRACT/);
+  assert.equal(target.commands.length, 1);
 });
