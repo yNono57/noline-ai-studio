@@ -10,7 +10,7 @@ import { ForgeRuntimeDiagnostics } from "./ForgeRuntimeDiagnostics";
 import { ForgeAgentRunnerPanel } from "./ForgeAgentRunnerPanel";
 
 type AgentLaunchRequest = { id: string; objective: string };
-export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange, onConversationUpdated, onAgentPayloadChange, onAgentMessagesPersisted }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void; onConversationUpdated?: (conversation: import("@/lib/forge/forge-store").ForgeConversation) => void; onAgentPayloadChange?: (payload: import("@/lib/forge/forge-client").ForgeAgentRunPayload | null) => void; onAgentMessagesPersisted?: (messages: import("@/lib/forge/forge-store").ForgeMessage[]) => void }) {
+export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequest, onAgentLaunchRequestHandled, onAgentActiveChange, onRuntimeReadyChange, onRuntimeChange, onConversationUpdated, onAgentPayloadChange, onAgentMessagesPersisted }: { project: ForgeProject | undefined; conversationId: string; agentLaunchRequest?: AgentLaunchRequest | null; onAgentLaunchRequestHandled?: (id: string) => void; onAgentActiveChange?: (active: boolean) => void; onRuntimeReadyChange?: (ready: boolean) => void; onRuntimeChange?: (runtime: ForgeRuntimeView | null) => void; onConversationUpdated?: (conversation: import("@/lib/forge/forge-store").ForgeConversation) => void; onAgentPayloadChange?: (payload: import("@/lib/forge/forge-client").ForgeAgentRunPayload | null) => void; onAgentMessagesPersisted?: (messages: import("@/lib/forge/forge-store").ForgeMessage[]) => void }) {
   const [workspace, setWorkspace] = useState<ForgeWorkspaceView | null>(null);
   const [runtime, setRuntime] = useState<ForgeRuntimeView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +38,7 @@ export function ForgeWorkspaceControl({ project, conversationId, agentLaunchRequ
   }, [conversationId, workspace?.status, workspace?.workspaceId]);
 
   useEffect(() => { onRuntimeReadyChange?.(runtime?.status === "READY"); }, [onRuntimeReadyChange, runtime?.status]);
+  useEffect(() => { onRuntimeChange?.(runtime); }, [onRuntimeChange, runtime]);
 
   async function prepare() {
     if (!conversationId || loading) return;

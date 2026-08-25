@@ -56,6 +56,7 @@ const sections = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const routeProduct = productForPath(pathname);
+  const forgeWorkspace = pathname === "/forge";
   const [openProduct, setOpenProduct] = useState<ProductKey | null>(routeProduct);
   const active = (href: string) => pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
   const linkClass = (href: string) => `flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-bold transition ${active(href) ? "bg-white text-noline-black" : "text-noline-muted hover:bg-white/10 hover:text-white"}`;
@@ -80,7 +81,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <footer className="mt-4 shrink-0"><div className="rounded-lg border border-noline-orange/40 bg-noline-orange/10 p-4"><BriefcaseBusiness className="h-5 w-5 text-noline-orange" /><p className="mt-3 text-sm font-black text-white">NOLINE Pro</p><p className="mt-1 text-xs leading-5 text-noline-muted">Votre production, vos clients et vos documents au même endroit.</p></div></footer>
       </aside>
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 border-b border-white/10 bg-noline-black/88 backdrop-blur-xl lg:hidden">
+        <header className={`sticky top-0 z-30 border-b border-white/10 bg-noline-black/88 backdrop-blur-xl lg:hidden ${forgeWorkspace ? "hidden" : ""}`}>
           <div className="flex items-center justify-between px-4 py-4"><Link href="/dashboard"><Brand /></Link><Link href="/generate" className="rounded-md bg-noline-orange px-4 py-2 text-sm font-black text-noline-black">Créer</Link></div>
           <nav aria-label="Produits NØLINE AI" className="flex gap-2 overflow-x-auto border-t border-white/10 px-4 py-2">
             <Link href="/dashboard" className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold ${active("/dashboard") ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}><BarChart3 className="h-4 w-4" />Dashboard</Link>
@@ -88,7 +89,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
           {openProduct ? <MobileProductMenu product={products.find((product) => product.key === openProduct)!} active={active} /> : null}
         </header>
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className={forgeWorkspace ? "min-w-0 px-2 py-2 sm:px-3 sm:py-3 lg:px-4" : "mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"}>{children}</main>
       </div>
     </div>
   );
