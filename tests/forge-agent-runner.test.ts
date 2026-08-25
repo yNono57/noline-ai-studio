@@ -456,3 +456,49 @@ test("diagnostic de persistance expose seulement opération et code sûrs", () =
   assert.match(source, /Persistance Forge impossible \(\$\{operation\}, code \$\{code\}\)/);
   assert.doesNotMatch(source, /console\.error\([^\n]*(?:path|body|userId|runId|token|secret)/i);
 });
+
+
+test("mission complexe dépasse 20 étapes utiles et termine dans le budget borné", async () => {
+  const decisions: Array<Record<string, unknown>> = [
+    ...Array.from({ length: 5 }, (_item, index) => ({ type: "TOOL_CALL", summary: `Lire config ${index}`, tool: "read_file", input: { path: `config-${index}.json` } })),
+    ...Array.from({ length: 12 }, (_item, index) => ({ type: "TOOL_CALL", summary: `Créer fichier ${index}`, tool: "write_file", input: { path: `src/file-${index}.ts`, content: `export const value${index} = ${index};` } })),
+    { type: "TOOL_CALL", summary: "Valider une première fois", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
+    { type: "TOOL_CALL", summary: "Inspecter après mutations", tool: "list_files", input: { path: "src" } },
+    { type: "TOOL_CALL", summary: "Appliquer la correction", tool: "write_file", input: { path: "src/final.ts", content: "export const ready = true;" } },
+    { type: "TOOL_CALL", summary: "Validation finale", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Implémentation et validations terminées." },
+    { type: "FINAL", summary: "Terminé", report: "Implémentation, validations et Git status terminés." },
+    { type: "FINAL", summary: "Terminé", report: "Implémentation, validations, Git status et Git diff réels terminés sans commit ni push." },
+  ];
+  const target = harness(decisions, false, { commandResults: [
+    { stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 5 },
+    { stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 5 },
+  ] });
+  const result = await target.runner.run("user-a", "conversation-a", "Crée une application multi-fichiers, lance les tests et vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.ok(target.steps.length > 20);
+  assert.equal(target.steps.length, 25);
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.doesNotMatch(JSON.stringify(target.steps), /git_add|git_commit|git_push/);
+});
+
+test("anti-loop arrête quatre inspections répétées bien avant le plafond de 60 étapes", async () => {
+  const repeated = { type: "TOOL_CALL", summary: "Relister", tool: "list_files", input: { path: "." } };
+  const target = harness([{ ...repeated, summary: "Inspection initiale" }, ...Array.from({ length: 10 }, () => repeated)]);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Inspecte le repository."), /ne progresse pas après quatre récupérations structurées/);
+  assert.equal(target.lists.length, 1);
+  assert.equal(target.steps.length, 6);
+  assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
+});
+
+test("budget Forge reste borné à 60 étapes, 48 outils et contraintes SQL alignées", () => {
+  assert.equal(FORGE_AGENT_LIMITS.maxSteps, 60);
+  assert.equal(FORGE_AGENT_LIMITS.maxToolCalls, 48);
+  assert.equal(FORGE_AGENT_LIMITS.maxRuntimeSeconds, 240);
+  assert.equal(FORGE_AGENT_LIMITS.maxCommandTimeoutMs, 60_000);
+  const sql = fs.readFileSync("supabase/migrations/20260825_forge_agent_step_budget.sql", "utf8");
+  assert.match(sql, /drop constraint if exists forge_agent_steps_step_number_check/i);
+  assert.match(sql, /step_number between 1 and 60/i);
+  assert.doesNotMatch(sql, /drop table|truncate/i);
+});

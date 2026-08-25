@@ -1,7 +1,7 @@
 import { FORGE_RUNTIME_LIMITS, normalizeRuntimeCommand, normalizeRuntimePath, type ForgeRuntimeCommand, type ForgeRuntimeCommandResult, type ForgeRuntimeFile, type ForgeRuntimeFileEntry, type ForgeRuntimeGitDiff, type ForgeRuntimeGitStatus } from "./runtime-foundation";
 import { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } from "./agent-limits";
 
-export const FORGE_AGENT_LIMITS = { maxSteps: 20, maxToolCalls: 16, maxRuntimeSeconds: 240, maxCommandTimeoutMs: 60_000, maxOutputCharacters: 20_000, maxObjectiveCharacters: FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } as const;
+export const FORGE_AGENT_LIMITS = { maxSteps: 60, maxToolCalls: 48, maxRuntimeSeconds: 240, maxCommandTimeoutMs: 60_000, maxOutputCharacters: 20_000, maxObjectiveCharacters: FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } as const;
 export type ForgeAgentRunStatus = "QUEUED" | "PLANNING" | "RUNNING" | "VALIDATING" | "COMPLETED" | "FAILED" | "CANCELLED";
 export type ForgeAgentStepType = "PLAN" | "TOOL_CALL" | "FINAL" | "FAIL";
 export type ForgeAgentToolName = "list_files" | "read_file" | "write_file" | "delete_file" | "run_command" | "git_status" | "git_diff";
