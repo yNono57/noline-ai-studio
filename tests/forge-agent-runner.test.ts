@@ -3,14 +3,14 @@ export {};
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
-const { createForgeAgentRunner, normalizeAgentCommand, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
+const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS } = require("../lib/forge/agent-foundation.ts");
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
 const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.ts");
 const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
-function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false) {
-  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(); let commandIndex = 0;
+function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string> } = {}) {
+  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
     async createRun(input: Record<string, unknown>) { run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
@@ -18,7 +18,7 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
     async isCancelled() { return typeof cancelled === "function" ? cancelled() : cancelled; },
-    runtime() { return { async listFiles(path: string) { lists.push(path); return [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
+    runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const failing = commandIndex++ === 0; return { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
   return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, lists, contexts, files };
@@ -147,6 +147,66 @@ test("FINAL prématuré déclenche les preuves Git réelles sans boucle", async 
   assert.doesNotMatch(JSON.stringify(target.steps), /Vérifications Git manquantes/);
   assert.match(String(target.run()?.finalReport), /non suivi.*src\/index\.ts.*Git diff/i);
   assert.ok(target.steps.every((step) => !["git_add", "git_commit", "git_push"].includes(String(step.tool))));
+});
+test("completion gates distinguent lecture, mutation, validation et Git", () => {
+  assert.deepEqual(deriveForgeMissionRequirements("Inspecte README.md et résume son contenu."), { mutation: false, validation: false, gitStatus: false, gitDiff: false });
+  assert.deepEqual(deriveForgeMissionRequirements("Crée une application puis lance le build et vérifie Git status et Git diff."), { mutation: true, validation: true, gitStatus: true, gitDiff: true });
+  assert.deepEqual(deriveForgeMissionRequirements("Vérifie Git status."), { mutation: false, validation: false, gitStatus: true, gitDiff: false });
+});
+
+test("repository minimal ECLYRA refuse FINAL d inspection puis implémente, corrige et valide", async () => {
+  const objective = "Transforme ce repository minimal en petite application React TypeScript jouable avec plusieurs fichiers. Lance le build, puis vérifie Git status et Git diff.";
+  const premature = { type: "FINAL", summary: "Stack absente", report: "Le dépôt ne contient que .git, README.md et hello-forge.txt. Aucune stack n’est présente; prochaines étapes: initialiser l’application." };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Inspecter la racine", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Lire README", tool: "read_file", input: { path: "README.md" } },
+    premature,
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /Mission incomplète/); assert.match(history, /créer ou modifier/); assert.match(history, /validation demandée/); assert.match(history, /absence initiale de stack/i); return { type: "TOOL_CALL", summary: "Initialiser package", tool: "write_file", input: { path: "package.json", content: '{"scripts":{"build":"vite build"}}' } }; },
+    { type: "TOOL_CALL", summary: "Créer la page", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App(){return <main>ECLYRA</main>}" } },
+    { type: "TOOL_CALL", summary: "Construire", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "TOOL_CALL", summary: "Corriger la page", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ECLYRA</main>; }" } },
+    { type: "TOOL_CALL", summary: "Reconstruire", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Application prête", report: "Application créée et build validé." },
+    { type: "FINAL", summary: "Application prête", report: "Application créée, build réussi, Git status et Git diff réels vérifiés sans commit ni push." },
+    { type: "FINAL", summary: "Application prête", report: "Application créée, build réussi, Git status et Git diff réels vérifiés sans commit ni push." },
+  ], false, { entries: [{ path: ".git", type: "directory", size: 0 }, { path: "README.md", type: "file", size: 20 }, { path: "hello-forge.txt", type: "file", size: 23 }], files: { "README.md": "# ECLYRA minimal", "hello-forge.txt": "Hello from NØLINE Forge" } });
+  const result = await target.runner.run("user-a", "conversation-a", objective);
+  assert.equal(result.status, "COMPLETED");
+  assert.deepEqual(target.lists, ["."]);
+  assert.ok(target.reads.includes("README.md"));
+  assert.ok(target.reads.includes("package.json"));
+  assert.ok(target.reads.includes("src/App.tsx"));
+  assert.equal(target.steps.find((step) => step.summary === "Stack absente")?.type, undefined);
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 1);
+  assert.equal(target.steps.find((step) => step.summary === "Construire")?.status, "FAILED");
+  assert.equal(target.steps.find((step) => step.summary === "Reconstruire")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.doesNotMatch(JSON.stringify(target.steps), /git_commit|git_push/);
+});
+
+test("mission mutative ne peut pas terminer après une simple inspection", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Inspecter", tool: "list_files", input: { path: "." } },
+    { type: "FINAL", summary: "Terminé", report: "Repository inspecté." },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /write_file\/delete_file/); return { type: "TOOL_CALL", summary: "Créer", tool: "write_file", input: { path: "src/new.ts", content: "export {};" } }; },
+    { type: "FINAL", summary: "Terminé", report: "Fichier créé et preuves Git obtenues." },
+    { type: "FINAL", summary: "Terminé", report: "Fichier créé et preuves Git obtenues." },
+    { type: "FINAL", summary: "Terminé", report: "Fichier créé et preuves Git obtenues." },
+  ]);
+  assert.equal((await target.runner.run("user-a", "conversation-a", "Inspecte puis crée src/new.ts.")).status, "COMPLETED");
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 1);
+});
+
+test("blocker réel après échec outil termine proprement", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Inspecter", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Écrire", tool: "write_file", input: { path: "src/App.tsx" } },
+    { type: "FAIL", summary: "Écriture bloquée", error: "Le provider a refusé l’écriture après tentative réelle." },
+  ]);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Crée une application."), /provider a refusé/i);
+  assert.equal(target.run()?.status, "FAILED");
+  assert.equal(target.steps.find((step) => step.summary === "Écrire")?.status, "FAILED");
 });
 test("mission complexe récupère un FAIL prématuré puis utilise réellement le runtime", async () => {
   const objective = "Inspecte le repository. S’il est minimal, initialise une application React TypeScript puis crée une première page. Vérifie ensuite le build et Git diff.";
