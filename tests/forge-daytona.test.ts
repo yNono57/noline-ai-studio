@@ -52,10 +52,12 @@ daytonaTest("routes runtime rederivent toutes l'utilisateur authentifie", () => 
   }
 });
 
-daytonaTest("provider expose status et diff mais aucune capacite commit ou push", () => {
+daytonaTest("provider expose status et diff des fichiers suivis et non suivis sans modifier l index", () => {
   daytonaAssert.match(provider, /git status --porcelain/);
   daytonaAssert.match(provider, /git diff --no-ext-diff/);
-  daytonaAssert.doesNotMatch(provider, /git commit|git push|\.git\.commit|\.git\.push/);
+  daytonaAssert.match(provider, /git diff --no-index --no-ext-diff --no-color -- \/dev\/null/);
+  daytonaAssert.match(provider, /added\.exitCode !== 0 && added\.exitCode !== 1/);
+  daytonaAssert.doesNotMatch(provider, /git add|git commit|git push|\.git\.commit|\.git\.push/);
 });
 
 daytonaTest("sorties et durees de commande sont bornees", () => {

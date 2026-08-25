@@ -119,6 +119,33 @@ test("mission hello-forge vérifie écriture exacte, Git status, Git diff et FIN
   assert.doesNotMatch(JSON.stringify(target.steps), /git_commit|git_push/);
 });
 
+test("FINAL prématuré déclenche les preuves Git réelles sans boucle", async () => {
+  const objective = "Crée un fichier hello-forge.txt contenant exactement :\n\nHello from NØLINE Forge\n\nPuis vérifie Git status et Git diff. Ne crée aucun commit et ne push rien.";
+  const premature = { type: "FINAL", summary: "Mission terminée", report: "hello-forge.txt a été créé. Les vérifications Git sont terminées." };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Créer le fichier", tool: "write_file", input: { path: "hello-forge.txt", content: "Hello from NØLINE Forge" } },
+    premature,
+    premature,
+    (context: Record<string, unknown>) => {
+      const history = JSON.stringify(context);
+      assert.match(history, /hello-forge\.txt/);
+      assert.match(history, /src\/index\.ts/);
+      assert.match(history, /REPOSITORY DIFF/);
+      assert.match(history, /Hello from NØLINE Forge/);
+      return { type: "FINAL", summary: "Mission terminée", report: "hello-forge.txt existe avec le contenu exact. Git status le signale comme nouveau fichier non suivi, src/index.ts est modifié, et Git diff contient le changement réel. Aucun git add, commit ou push." };
+    },
+  ]);
+  const result = await target.runner.run("user-a", "conversation-a", objective);
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.files.get("hello-forge.txt"), "Hello from NØLINE Forge");
+  assert.ok(target.reads.includes("hello-forge.txt"));
+  assert.deepEqual(target.steps.filter((step) => step.type === "TOOL_CALL").map((step) => step.tool), ["write_file", "git_status", "git_diff"]);
+  assert.equal(target.steps.find((step) => step.summary === "Vérification Git status obligatoire")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.summary === "Vérification Git diff obligatoire")?.status, "COMPLETED");
+  assert.doesNotMatch(JSON.stringify(target.steps), /Vérifications Git manquantes/);
+  assert.match(String(target.run()?.finalReport), /non suivi.*src\/index\.ts.*Git diff/i);
+  assert.ok(target.steps.every((step) => !["git_add", "git_commit", "git_push"].includes(String(step.tool))));
+});
 test("appel shell Git invalide reçoit une erreur structurée et ne boucle pas", async () => {
   const invalid = { type: "TOOL_CALL", summary: "Git combiné", tool: "run_command", input: { command: "git status --short && printf '\\n---DIFF---\\n' && git diff -- hello-forge.txt", args: [], cwd: "." } };
   const target = harness([

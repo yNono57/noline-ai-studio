@@ -134,12 +134,14 @@ export const daytonaRuntimeProvider: ForgeRuntimeProvider = {
   async getGitDiff(runtime, maxPatchCharacters) {
     const sandbox = await sandboxFor(runtime), status = await daytonaRuntimeProvider.getGitStatus(runtime);
     const tracked = await run(sandbox, "git diff --no-ext-diff --no-color HEAD -- . | head -c " + (maxPatchCharacters + 1));
+    if (tracked.exitCode !== 0) throw new ForgeRuntimeError("UNAVAILABLE", "Git diff a echoue dans le sandbox.");
     let patch = tracked.result;
     let truncated = patch.length > maxPatchCharacters;
     for (const path of status.added) {
       if (patch.length > maxPatchCharacters) break;
       const remaining = maxPatchCharacters + 1 - patch.length;
       const added = await run(sandbox, "git diff --no-index --no-ext-diff --no-color -- /dev/null " + quoteSandboxArgument(path) + " | head -c " + remaining);
+      if (added.exitCode !== 0 && added.exitCode !== 1) throw new ForgeRuntimeError("UNAVAILABLE", "Git diff a echoue dans le sandbox.");
       patch += added.result;
       if (patch.length > maxPatchCharacters) truncated = true;
     }

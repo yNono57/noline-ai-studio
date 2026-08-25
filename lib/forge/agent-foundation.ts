@@ -120,7 +120,23 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           }
           const missingEvidence = mutationOccurred ? [!gitStatusSucceeded ? "git_status" : "", !gitDiffSucceeded ? "git_diff" : ""].filter(Boolean) : [];
           if (missingEvidence.length) {
-            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Vérifications Git manquantes", tool: null, input: {}, resultSummary: `Exécute les outils dédiés suivants avant FINAL : ${missingEvidence.join(", ")}.`, status: "FAILED", startedAt: now, completedAt: now }));
+            const mandatoryTool = missingEvidence[0] as "git_status" | "git_diff";
+            if (++toolCalls > FORGE_AGENT_LIMITS.maxToolCalls) throw new ForgeAgentError("LIMIT", "Nombre maximal d’outils atteint.");
+            const executing = await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: mandatoryTool === "git_status" ? "Vérification Git status obligatoire" : "Vérification Git diff obligatoire", tool: mandatoryTool, input: {}, resultSummary: null, status: "RUNNING", startedAt: now, completedAt: null });
+            try {
+              const result = await executeTool(deps.runtime(userId, conversationId), mandatoryTool, {});
+              const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(mandatoryTool, result, false), status: "COMPLETED", completedAt: deps.now() });
+              successfulToolCalls += 1;
+              if (mandatoryTool === "git_status") gitStatusSucceeded = true;
+              else gitDiffSucceeded = true;
+              steps.push({ ...persisted, resultSummary: summarizeToolResult(mandatoryTool, result, true) });
+              run = await deps.updateRun(userId, run.runId, { status: "VALIDATING", lastActivityAt: deps.now() });
+            } catch (error) {
+              const reason = sanitizeAgentText(error instanceof Error ? error.message : "Vérification Git en échec.", 1000);
+              const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: reason, status: "FAILED", completedAt: deps.now() });
+              steps.push({ ...failed, resultSummary: reason });
+              throw error;
+            }
             continue;
           }
           if (validationFailed) {
