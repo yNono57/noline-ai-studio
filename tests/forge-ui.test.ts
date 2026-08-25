@@ -68,3 +68,10 @@ test("soumission Agent possède deux verrous synchrones et un identifiant stable
   assert.match(conversation, /forge_agent_run_id/);
   assert.match(route, /authenticateForge\(request\)/);
 });
+test("une coupure du POST long est récupérée seulement si le polling confirme le nouveau run", () => {
+  const panel = require("node:fs").readFileSync("components/ForgeAgentRunnerPanel.tsx", "utf8");
+  assert.match(panel, /catch \(caught\)[\s\S]*getLatestForgeAgentRun\(conversationId\)/);
+  assert.match(panel, /latest\?\.run\.objective === value\.trim\(\)/);
+  assert.match(panel, /Date\.parse\(latest\.run\.createdAt\) >= launchStartedAt/);
+  assert.match(panel, /if \(!recovered\) setError/);
+});

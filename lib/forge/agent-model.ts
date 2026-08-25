@@ -16,6 +16,7 @@ Pour run_command, command est uniquement le nom de l'exécutable (ex: "npm") et 
 Pour vérifier Git, utilise exclusivement deux TOOL_CALL distincts: git_status avec input {}, puis git_diff avec input {}. N'utilise pas run_command pour Git.
 Après write_file, le runner relit et vérifie automatiquement le contenu exact. Après toute mutation, git_status et git_diff doivent réussir avant FINAL.
 Les obligations de l'objectif restent autoritaires: une mission de création/modification exige une mutation réelle; une validation demandée exige un run_command marqué validation=true et réussi. Un repository vide ou minimal n'est pas un blocker si l'objectif demande de créer le projet.
+Quand RECOVERY confirme un repository minimal ou OPTIONAL FILE ABSENT, ne répète pas l'inspection: passe à la prochaine obligation avec write_file ou run_command selon le besoin.
 FINAL: {"type":"FINAL","summary":"...","report":"..."}
 N'emets FINAL qu'apres avoir execute les outils necessaires. Le report decrit les resultats effectivement observes, jamais une intention future comme 'je vais...'.
 FAIL: {"type":"FAIL","summary":"...","error":"..."}`;

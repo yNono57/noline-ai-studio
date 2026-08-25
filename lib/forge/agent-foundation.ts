@@ -54,6 +54,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let run = await deps.createRun({ userId, projectId: context.projectId, conversationId, workspaceId: context.workspaceId, runtimeId: context.runtimeId, status: "QUEUED", objective, baseCommitSha: context.baseCommitSha, plan: [], finalReport: null, startedAt: null, completedAt: null, lastActivityAt: null, error: null });
     const steps: ForgeAgentStep[] = [];
     const failedCalls = new Map<string, number>();
+    const successfulInspections = new Set<string>();
     let toolCalls = 0;
     let successfulToolCalls = 0;
     let failedToolCalls = 0;
@@ -64,6 +65,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
     let gitStatusSucceeded = false;
     let gitDiffSucceeded = false;
     let prematureTerminations = 0;
+    let inspectionSatisfied = false;
+    let minimalRepositoryConfirmed = false;
     try {
       run = await deps.updateRun(userId, run.runId, { status: "PLANNING", startedAt: deps.now(), lastActivityAt: deps.now() });
       if (await deps.isCancelled(userId, run.runId)) throw new ForgeAgentError("CANCELLED", "Run annulé.");
@@ -92,6 +95,12 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           const signature = `${mutationVersion}:${decision.tool}:${JSON.stringify(decision.input)}`;
           const previousFailures = failedCalls.get(signature) || 0;
           if (previousFailures >= 2) throw new ForgeAgentError("MODEL", "Le modèle Forge répète un appel d’outil invalide sans le corriger.");
+          if ((decision.tool === "list_files" || decision.tool === "read_file") && successfulInspections.has(signature) && previousFailures === 0) {
+            const duplicateMessage = "Inspection déjà réussie pour ce chemin dans l’état courant. Réutilise le résultat existant et poursuis avec la prochaine obligation non satisfaite.";
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Inspection redondante refusée", tool: decision.tool, input: safeInput, resultSummary: duplicateMessage, status: "FAILED", startedAt: now, completedAt: now }));
+            failedCalls.set(signature, 1);
+            continue;
+          }
           if (previousFailures === 1) {
             const duplicateMessage = "Appel identique déjà refusé. Corrige le schéma de l’outil; pour Git utilise git_status puis git_diff, sans shell composé.";
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: sanitizeAgentText(decision.summary, 1000), tool: decision.tool, input: safeInput, resultSummary: duplicateMessage, status: "FAILED", startedAt: now, completedAt: now }));
@@ -111,6 +120,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               successfulToolCalls += 1;
               prematureTerminations = 0;
               if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
+              if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(signature); inspectionSatisfied = true; }
+              if (decision.tool === "list_files" && normalizeAgentPath(decision.input.path ?? ".", true) === ".") minimalRepositoryConfirmed = isMinimalRepositoryListing(result);
               if (decision.tool === "git_status") gitStatusSucceeded = true;
               if (decision.tool === "git_diff") gitDiffSucceeded = true;
             }
@@ -121,9 +132,12 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             if (error instanceof ForgeAgentError && error.code === "CANCELLED") throw error;
             if (validation) validationFailed = true;
             failedCalls.set(signature, 1);
-            failedToolCalls += 1;
+            const missingOptionalFile = decision.tool === "read_file" && hasErrorCode(error, "NOT_FOUND");
+            if (!missingOptionalFile) failedToolCalls += 1;
             const reason = sanitizeAgentText(error instanceof Error ? error.message : "Outil en échec.", 1000);
-            const actionable = sanitizeAgentText(`TOOL ERROR: ${reason} Corrige l’entrée et choisis l’outil dédié; git_status/git_diff n’acceptent pas de commande shell.`, 1400);
+            const actionable = missingOptionalFile
+              ? sanitizeAgentText(`OPTIONAL FILE ABSENT: ${reason} Cette absence est une information d'inspection, pas un blocker runtime. N'essaie pas de relire ce chemin; poursuis avec la prochaine obligation.`, 1400)
+              : sanitizeAgentText(`TOOL ERROR: ${reason} Corrige l'entrée et choisis l'outil dédié; git_status/git_diff n'acceptent pas de commande shell.`, 1400);
             const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: actionable, status: "FAILED", completedAt: deps.now() });
             steps.push({ ...failed, resultSummary: actionable });
             run = await deps.updateRun(userId, run.runId, { status: "RUNNING", lastActivityAt: deps.now() });
@@ -141,7 +155,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed });
           if (missingRequirements.length) {
             prematureTerminations += 1;
-            const recovery = completionRecoveryMessage(prematureTerminations, missingRequirements);
+            const recovery = completionRecoveryMessage(prematureTerminations, missingRequirements, { inspectionSatisfied, minimalRepositoryConfirmed });
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Mission incomplète", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
             if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge tente de terminer sans satisfaire les obligations de la mission.");
             continue;
@@ -179,7 +193,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
         const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed });
         if (successfulToolCalls === 0 || (missingRequirements.length && failedToolCalls === 0)) {
           prematureTerminations += 1;
-          const recovery = successfulToolCalls === 0 ? startupRecoveryMessage(prematureTerminations, decision.error) : completionRecoveryMessage(prematureTerminations, missingRequirements, decision.error);
+          const recovery = successfulToolCalls === 0 ? startupRecoveryMessage(prematureTerminations, decision.error) : completionRecoveryMessage(prematureTerminations, missingRequirements, { inspectionSatisfied, minimalRepositoryConfirmed }, decision.error);
           steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: successfulToolCalls === 0 ? "Démarrage agentique incomplet" : "Mission incomplète", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
           if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse d’utiliser les outils nécessaires après trois demandes de récupération.");
           continue;
@@ -208,9 +222,18 @@ function getMissingCompletionRequirements(requirements: ForgeMissionRequirements
   if (requirements.validation && state.validationAttempted && state.validationFailed) missing.push("corriger l’échec puis relancer la validation avec succès");
   return missing;
 }
-function completionRecoveryMessage(attempt: number, missing: string[], modelError?: string) {
+function completionRecoveryMessage(attempt: number, missing: string[], inspection: { inspectionSatisfied: boolean; minimalRepositoryConfirmed: boolean }, modelError?: string) {
   const reason = modelError ? `La terminaison demandée a été refusée: ${sanitizeAgentText(modelError, 500)} ` : "";
-  return sanitizeAgentText(`${reason}RECOVERY ${attempt}/3: FINAL refusé. Mission incomplète. Obligations restantes:\n- ${missing.join("\n- ")}\nPoursuis avec un TOOL_CALL réel. L’absence initiale de stack ou de fichiers n’est pas un blocker lorsque la mission demande de les créer.`, 1800);
+  const repositoryState = inspection.minimalRepositoryConfirmed
+    ? "Repository minimal confirmé. L'absence de fichiers source n'est pas un blocker. L'obligation d'inspection est satisfaite. "
+    : inspection.inspectionSatisfied ? "Inspection du repository déjà effectuée. " : "";
+  return sanitizeAgentText(`${reason}${repositoryState}RECOVERY ${attempt}/3: terminaison refusée. Mission incomplète. Obligations restantes:\n- ${missing.join("\n- ")}\nPoursuis avec le TOOL_CALL de la prochaine obligation; n'effectue pas une nouvelle inspection identique.`, 1900);
+}
+function hasErrorCode(error: unknown, code: string) { return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code; }
+function isMinimalRepositoryListing(result: unknown) {
+  if (!Array.isArray(result)) return false;
+  const visibleEntries = result.filter((entry) => typeof entry === "object" && entry !== null && (entry as { path?: unknown }).path !== ".git");
+  return visibleEntries.length <= 4;
 }
 async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); const path = normalizeAgentPath(input.path); const written = await runtime.writeFile(path, input.content); const verified = await runtime.readFile(path); if (verified.content !== input.content) throw new ForgeAgentError("PERSISTENCE", "Le contenu relu ne correspond pas exactement au contenu écrit."); return written; } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }
 function safeToolInput(tool: ForgeAgentToolName, input: Record<string, unknown>) { if (tool === "write_file") return { path: input.path, characters: typeof input.content === "string" ? input.content.length : 0 }; if (tool === "run_command") return { command: input.command, cwd: input.cwd ?? ".", argsCount: Array.isArray(input.args) ? input.args.length : 0, validation: input.validation === true }; return { path: input.path }; }
