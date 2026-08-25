@@ -274,7 +274,7 @@ test("mission complexe récupère un FAIL prématuré puis utilise réellement l
   const objective = "Inspecte le repository. S’il est minimal, initialise une application React TypeScript puis crée une première page. Vérifie ensuite le build et Git diff.";
   const target = harness([
     { type: "FAIL", summary: "Impossible de poursuivre", error: "Aucun outil n’a encore été appelé dans cette session." },
-    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /RECOVERY 1\/3/); assert.match(history, /list_files.*read_file.*write_file.*run_command.*git_status.*git_diff/); return { type: "TOOL_CALL", summary: "Inspecter la racine", tool: "list_files", input: { path: "." } }; },
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /RECOVERY(?::| 1\/3)/); assert.match(history, /list_files.*read_file.*write_file.*run_command.*git_status.*git_diff/); return { type: "TOOL_CALL", summary: "Inspecter la racine", tool: "list_files", input: { path: "." } }; },
     { type: "TOOL_CALL", summary: "Lire package.json", tool: "read_file", input: { path: "package.json" } },
     { type: "TOOL_CALL", summary: "Créer la page", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App(){return <main>ECLYRA</main>}" } },
     { type: "TOOL_CALL", summary: "Vérifier le build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } },
@@ -300,7 +300,7 @@ test("mission complexe récupère un FAIL prématuré puis utilise réellement l
 test("trois terminaisons prématurées sans outil échouent proprement sans boucle", async () => {
   const refusal = { type: "FAIL", summary: "Refus", error: "Je ne peux pas utiliser les outils." };
   const target = harness([refusal, refusal, refusal, refusal]);
-  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Inspecte et modifie le repository"), /trois demandes de récupération/);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Inspecte et modifie le repository"), /refuse de progresser dans la récupération requise/);
   assert.equal(target.run()?.status, "FAILED");
   assert.equal(target.steps.filter((step) => step.summary === "Démarrage agentique incomplet").length, 3);
   assert.equal(target.contexts.length, 3);
@@ -400,7 +400,7 @@ test("write_file invalide reste récupérable, observable et ne compte pas comme
   const target = harness([
     { type: "TOOL_CALL", summary: "Écriture incomplète", tool: "write_file", input: { path: "index.html" } },
     { type: "FAIL", summary: "Abandon prématuré", error: "write_file a échoué." },
-    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /contentProvided[^]*false/); assert.match(history, /INVALID_INPUT/); assert.match(history, /RECOVERY 1\/3/); assert.match(history, /write_file/); return { type: "TOOL_CALL", summary: "Écriture corrigée", tool: "write_file", input: { path: "index.html", content: "<!doctype html>" } }; },
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /contentProvided[^]*false/); assert.match(history, /INVALID_INPUT/); assert.match(history, /RECOVERY(?::| 1\/3)/); assert.match(history, /write_file/); return { type: "TOOL_CALL", summary: "Écriture corrigée", tool: "write_file", input: { path: "index.html", content: "<!doctype html>" } }; },
     { type: "FINAL", summary: "Terminé", report: "index.html créé et vérifié." },
     { type: "FINAL", summary: "Terminé", report: "index.html créé; Git status vérifié." },
     { type: "FINAL", summary: "Terminé", report: "index.html créé; Git status et Git diff vérifiés." },
@@ -421,7 +421,7 @@ test("list_files normalise src slash terminal et la persistance ordonne recovery
     { type: "TOOL_CALL", summary: "Lister src", tool: "list_files", input: { path: "src/" } },
     { type: "TOOL_CALL", summary: "Écriture incomplète", tool: "write_file", input: { path: "src/index.ts" } },
     { type: "FAIL", summary: "Abandon prématuré", error: "write_file a échoué." },
-    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /TOOL ERROR \[INVALID_INPUT\]/); assert.match(history, /RECOVERY 1\/3/); return { type: "TOOL_CALL", summary: "Écrire source", tool: "write_file", input: { path: "src/index.ts", content: "export const ready = true;" } }; },
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /TOOL ERROR \[INVALID_INPUT\]/); assert.match(history, /RECOVERY(?::| 1\/3)/); return { type: "TOOL_CALL", summary: "Écrire source", tool: "write_file", input: { path: "src/index.ts", content: "export const ready = true;" } }; },
     { type: "TOOL_CALL", summary: "Valider", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
     { type: "FINAL", summary: "Terminé", report: "Source créée et testée." },
     { type: "FINAL", summary: "Terminé", report: "Source créée, testée et Git status vérifié." },
@@ -580,4 +580,58 @@ test("run_command invalide conserve un recovery de protocole précis", async () 
   assert.equal(result.status, "COMPLETED");
   assert.match(String(target.steps.find((step) => step.summary === "Commande invalide")?.resultSummary), /RUN_COMMAND_CONTRACT/);
   assert.equal(target.commands.length, 1);
+});
+
+test("trace Production: validation échouée progresse par inspection, correction et revalidation", async () => {
+  const prematureFail = { type: "FAIL", summary: "Mission incomplète", error: "Impossible de poursuivre sans correction." };
+  const prematureFinal = { type: "FINAL", summary: "Terminé", report: "Inspection terminée mais aucune correction disponible." };
+  const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const target = harness([
+    build,
+    prematureFail,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: DIAGNOSTIC/); return { type: "TOOL_CALL", summary: "Inspecter racine", tool: "list_files", input: { path: "." } }; },
+    prematureFinal,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /src\/App\.tsx/); return { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } }; },
+    prematureFail,
+    (context: Record<string, unknown>) => { const history=JSON.stringify(context); assert.match(history, /src\/App\.tsx/); return { type: "TOOL_CALL", summary: "Lire source responsable", tool: "read_file", input: { path: "src/App.tsx" } }; },
+    prematureFinal,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: CORRECTION/); return { type: "TOOL_CALL", summary: "Corriger source", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } }; },
+    prematureFail,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /PHASE OBLIGATOIRE: REVALIDATION/); return build; },
+    { type: "FINAL", summary: "Terminé", report: "Correction appliquée et build réussi." },
+    { type: "FINAL", summary: "Terminé", report: "Correction, build et Git status vérifiés." },
+    { type: "FINAL", summary: "Terminé", report: "Correction, build, Git status et Git diff vérifiés sans commit ni push." },
+  ], false, {
+    entries: [{ path: "package.json", type: "file", size: 42 }, { path: "src", type: "directory", size: 0 }],
+    files: { "package.json": '{"scripts":{"build":"vite build"}}', "src/App.tsx": "export default () => <main>broken</main>" },
+    commandResults: [
+      { stdout: "vite build", stderr: "src/App.tsx:4:2 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 8 },
+      { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 7 },
+    ],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Corrige l'application, lance le build puis vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands.length, 2);
+  assert.deepEqual(target.lists, ["."]);
+  assert.deepEqual(target.reads.filter((path) => path === "package.json" || path === "src/App.tsx"), ["package.json", "src/App.tsx", "src/App.tsx"]);
+  assert.equal(target.files.get("src/App.tsx"), "export default function App() { return <main>ready</main>; }");
+  assert.equal(target.steps.findLast((step) => step.summary === "Build")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.ok(target.steps.filter((step) => step.summary === "Mission incomplète").length >= 4);
+  assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
+  assert.doesNotMatch(JSON.stringify(target.steps), /git_add|git_commit|git_push/);
+});
+
+test("vrai anti-loop arrête trois terminaisons sans progression après validation échouée", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const refusal = { type: "FAIL", summary: "Refus", error: "Je ne corrige pas le projet." };
+  const target = harness([build, refusal, refusal, refusal, refusal], false, {
+    commandResults: [{ stdout: "", stderr: "src/App.tsx:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 5 }],
+  });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Corrige l'application et lance le build."), /refuse de progresser dans la récupération requise/);
+  assert.equal(target.commands.length, 1);
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 3);
+  assert.ok(target.steps.length < 10);
+  assert.ok(target.commands.length < FORGE_AGENT_LIMITS.maxToolCalls);
 });
