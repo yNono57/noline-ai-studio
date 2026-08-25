@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { Daytona, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError, SandboxState, type Sandbox } from "@daytona/sdk";
+import { Daytona, DaytonaFileAccessDeniedError, DaytonaInvalidFilePathError, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError, SandboxState, type Sandbox } from "@daytona/sdk";
 import { FORGE_RUNTIME_LIMITS, ForgeRuntimeError, normalizeRuntimePath, type ForgeRuntime, type ForgeRuntimeCommand, type ForgeRuntimeCommandResult, type ForgeRuntimeFileEntry, type ForgeRuntimeProvider, type ForgeRuntimeSource } from "./runtime-foundation";
 import { parseGitPorcelain, quoteSandboxArgument } from "./daytona-foundation";
 
@@ -111,7 +111,7 @@ export const daytonaRuntimeProvider: ForgeRuntimeProvider = {
         const relative = full.startsWith(ROOT + "/") ? full.slice(ROOT.length + 1) : full === ROOT ? "." : full;
         return { path: relative, type: entry.isDir ? "directory" : "file", size: entry.isDir ? null : entry.size };
       });
-    } catch { throw new ForgeRuntimeError("UNAVAILABLE", "La lecture du dossier runtime a echoue."); }
+    } catch (error) { if (error instanceof DaytonaNotFoundError) throw new ForgeRuntimeError("NOT_FOUND", "Dossier runtime introuvable."); if (error instanceof DaytonaInvalidFilePathError) throw new ForgeRuntimeError("INVALID_INPUT", "Chemin de dossier runtime invalide."); if (error instanceof DaytonaFileAccessDeniedError) throw new ForgeRuntimeError("AUTHORIZATION", "Accès au dossier runtime refusé."); throw new ForgeRuntimeError("UNAVAILABLE", "La lecture du dossier runtime a echoue."); }
   },
   async executeCommand(runtime, command: ForgeRuntimeCommand): Promise<ForgeRuntimeCommandResult> {
     const sandbox = await sandboxFor(runtime), started = Date.now(), session = "forge-" + runtime.runtimeId + "-" + randomUUID();

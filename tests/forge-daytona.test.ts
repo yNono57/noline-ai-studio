@@ -66,6 +66,14 @@ daytonaTest("sorties et durees de commande sont bornees", () => {
   daytonaAssert.match(provider, /timedOut: true/);
 });
 
+
+daytonaTest("list_files distingue input, absence, permission et indisponibilité provider", () => {
+  daytonaAssert.match(provider, /DaytonaInvalidFilePathError[\s\S]*INVALID_INPUT/);
+  daytonaAssert.match(provider, /DaytonaNotFoundError[\s\S]*NOT_FOUND/);
+  daytonaAssert.match(provider, /DaytonaFileAccessDeniedError[\s\S]*AUTHORIZATION/);
+  daytonaAssert.match(provider, /UNAVAILABLE/);
+});
+
 daytonaTest("aucun secret provider n'est journalise ou retourne", () => {
   daytonaAssert.doesNotMatch(provider, /console\.|return apiKey|Authorization/);
   const shared = daytonaFs.readFileSync(daytonaPath.join(runtimeRoot, "_shared.ts"), "utf8");

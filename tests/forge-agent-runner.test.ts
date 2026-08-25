@@ -11,10 +11,10 @@ const { runForgeAgentConversation } = require("../lib/forge/agent-conversation.t
 const { clearForgeSessionRestore, readForgeSessionRestore, resolveForgeSessionRestore, saveForgeSessionRestore } = require("../lib/forge/session-restore.ts");
 
 function harness(decisions: Array<Record<string, unknown> | ((context: Record<string, unknown>) => Record<string, unknown>)>, cancelled: boolean | (() => boolean) = false, options: { entries?: Array<Record<string, unknown>>; files?: Record<string, string>; missingFiles?: string[]; blockedFiles?: string[]; commandResults?: Array<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean; durationMs: number }> } = {}) {
-  let run: Record<string, unknown> | null = null; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
+  let run: Record<string, unknown> | null = null; let runCreates = 0; const steps: Array<Record<string, unknown>> = []; const commands: Array<Record<string, unknown>> = []; const writes: string[] = []; const reads: string[] = []; const lists: string[] = []; const contexts: Array<Record<string, unknown>> = []; const files = new Map<string, string>(Object.entries(options.files ?? {})); let commandIndex = 0;
   const deps = {
     async resolveContext(userId: string, conversationId: string) { if (userId !== "user-a" || conversationId !== "conversation-a") throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }); return { projectId: "project-a", workspaceId: "workspace-a", runtimeId: "runtime-a", repository: "yNono57/noline-forge-testbed", branch: "main", baseCommitSha: "a".repeat(40) }; },
-    async createRun(input: Record<string, unknown>) { run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
+    async createRun(input: Record<string, unknown>) { runCreates += 1; run = { ...input, runId: "run-a", createdAt: "2026-08-24T00:00:00.000Z" }; return run; },
     async updateRun(_userId: string, _runId: string, input: Record<string, unknown>) { Object.assign(run as object, input); return run; },
     async appendStep(_userId: string, input: Record<string, unknown>) { const step = { ...input, stepId: `step-${steps.length + 1}` }; steps.push(step); return step; },
     async updateStep(_userId: string, stepId: string, input: Record<string, unknown>) { const step = steps.find((item) => item.stepId === stepId); Object.assign(step as object, input); return step; },
@@ -22,7 +22,7 @@ function harness(decisions: Array<Record<string, unknown> | ((context: Record<st
     runtime() { return { async listFiles(path: string) { lists.push(path); return options.entries ?? [{ path: "README.md", type: "file", size: 48 }, { path: "package.json", type: "file", size: 20 }]; }, async readFile(path: string) { reads.push(path); if (options.missingFiles?.includes(path) && !files.has(path)) throw Object.assign(new Error("Fichier runtime introuvable."), { code: "NOT_FOUND" }); if (options.blockedFiles?.includes(path)) throw Object.assign(new Error("Runtime provider indisponible."), { code: "UNAVAILABLE" }); const content = files.get(path) ?? (path === "README.md" ? "# Forge Testbed\nRepository de validation Forge." : '{"name":"noline-forge-testbed"}'); return { path, size: content.length, content }; }, async writeFile(path: string, content: string) { writes.push(path); files.set(path, content); return { path, size: content.length, content }; }, async deleteFile() {}, async executeCommand(command: Record<string, unknown>) { commands.push(command); const configured = options.commandResults?.[commandIndex]; const failing = commandIndex++ === 0; return configured ?? { stdout: failing ? "test failed" : "tests pass", stderr: "", exitCode: failing ? 1 : 0, timedOut: false, truncated: false, durationMs: 10 }; }, async getGitStatus() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [] }; }, async getGitDiff() { return { added: writes.includes("hello-forge.txt") ? ["hello-forge.txt"] : [], modified: ["src/index.ts"], deleted: [], patch: writes.includes("hello-forge.txt") ? "diff --git a/hello-forge.txt\n+Hello from NØLINE Forge" : "diff --git a/src/index.ts", truncated: false }; } }; },
     model: { key: "mock", async decide(context: Record<string, unknown>) { contexts.push(context); const next = decisions.shift(); if (!next) throw new Error("missing decision"); return typeof next === "function" ? next(context) : next; } }, now: () => "2026-08-24T00:00:01.000Z",
   };
-  return { runner: createForgeAgentRunner(deps), run: () => run, steps, commands, writes, reads, lists, contexts, files };
+  return { runner: createForgeAgentRunner(deps), run: () => run, runCreates: () => runCreates, steps, commands, writes, reads, lists, contexts, files };
 }
 
 test("mission agentique persiste le fil et expose ses étapes réelles sans appeler le chat classique", async () => {
@@ -340,7 +340,7 @@ test("boucle agentique planifie, corrige une validation en échec puis termine",
 test("authentification et ownership sont dérivés côté serveur", async () => { await assert.rejects(() => harness([]).runner.run("", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "UNAUTHENTICATED"); await assert.rejects(() => harness([]).runner.run("user-b", "conversation-a", "Mission"), /not found/); });
 test("annulation empêche tout appel modèle ou outil", async () => { const target = harness([{ type: "FINAL", summary: "non", report: "non" }], true); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "CANCELLED"); assert.equal(target.steps.length, 0); assert.equal(target.run()?.status, "CANCELLED"); });
 test("annulation pendant un outil ne peut pas réactiver le run", async () => { const checks = [false, false, false, false, true]; const target = harness([{ type: "PLAN", summary: "plan", plan: ["status"] }, { type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }], () => checks.shift() ?? true); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "CANCELLED"); assert.equal(target.run()?.status, "CANCELLED"); });test("limite outils arrête la boucle", async () => { const decisions = [{ type: "PLAN", summary: "plan", plan: ["inspecter"] }, ...Array.from({ length: FORGE_AGENT_LIMITS.maxToolCalls + 1 }, () => ({ type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }))]; const target = harness(decisions); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.run()?.status, "FAILED"); });
-test("filesystem refuse traversal, absolu et fichiers sensibles", () => { assert.throws(() => normalizeAgentPath("../secret")); assert.throws(() => normalizeAgentPath("/etc/passwd")); assert.throws(() => normalizeAgentPath(".env")); assert.equal(normalizeAgentPath(".env.example"), ".env.example"); });
+test("filesystem normalise les slashs terminaux et refuse traversal, absolu et fichiers sensibles", () => { assert.equal(normalizeAgentPath("src/", true), "src"); assert.equal(normalizeAgentPath("./src/", true), "src"); assert.equal(normalizeAgentPath("src/components/", true), "src/components"); assert.throws(() => normalizeAgentPath("../secret")); assert.throws(() => normalizeAgentPath("/etc/passwd")); assert.throws(() => normalizeAgentPath("C:/Windows")); assert.throws(() => normalizeAgentPath(".env")); assert.equal(normalizeAgentPath(".env.example"), ".env.example"); });
 test("command policy refuse shell, secrets, host et Git write", () => { for (const input of [{ command: "bash", args: [], cwd: "." }, { command: "node", args: ["/etc/passwd"], cwd: "." }, { command: "git", args: ["status"], cwd: "." }, { command: "npm", args: ["publish"], cwd: "." }, { command: "vercel", args: ["deploy"], cwd: "." }, { command: "env", args: [], cwd: "." }, { command: "npm", args: ["install", "--token", "provider-secret"], cwd: "." }]) assert.throws(() => normalizeAgentCommand(input)); assert.equal(normalizeAgentCommand({ command: "npm", args: ["test"], cwd: ".", timeoutMs: 999999 }).timeoutMs, 60_000); });
 test("protocole modèle borne les décisions et outils", () => { const source = fs.readFileSync("lib/forge/agent-model.ts", "utf8"); for (const type of ["PLAN", "TOOL_CALL", "FINAL", "FAIL"]) assert.match(source, new RegExp(type)); assert.doesNotMatch(source, /git_push|git_commit/); assert.match(source, /jsonMode: true/); assert.match(source, /RECOVERY/); assert.match(source, /INSPECTION_SATISFIED/); for (const tool of ["list_files", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"]) assert.match(source, new RegExp(tool)); });
 test("redaction supprime tokens et secrets des résumés", () => { const text = sanitizeAgentText("OPENAI_API_KEY=super-secret-value ghp_abcdefghijklmnopqrstuvwxyz https://user:password@example.com Bearer provider-token"); assert.doesNotMatch(text, /super-secret|ghp_|user:password|provider-token/); });
@@ -411,4 +411,48 @@ test("write_file invalide reste récupérable, observable et ne compte pas comme
   assert.equal(target.files.get("index.html"), "<!doctype html>");
   assert.match(String(target.steps.find((step) => step.summary === "Écriture incomplète")?.resultSummary), /TOOL ERROR \[INVALID_INPUT\].*contentProvided.*false/);
   assert.equal(target.steps.find((step) => step.summary === "Écriture corrigée")?.status, "COMPLETED");
+});
+
+
+test("list_files normalise src slash terminal et la persistance ordonne recovery puis FINAL", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lister la racine", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Lister src", tool: "list_files", input: { path: "src/" } },
+    { type: "TOOL_CALL", summary: "Écriture incomplète", tool: "write_file", input: { path: "src/index.ts" } },
+    { type: "FAIL", summary: "Abandon prématuré", error: "write_file a échoué." },
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /TOOL ERROR \[INVALID_INPUT\]/); assert.match(history, /RECOVERY 1\/3/); return { type: "TOOL_CALL", summary: "Écrire source", tool: "write_file", input: { path: "src/index.ts", content: "export const ready = true;" } }; },
+    { type: "TOOL_CALL", summary: "Valider", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Source créée et testée." },
+    { type: "FINAL", summary: "Terminé", report: "Source créée, testée et Git status vérifié." },
+    { type: "FINAL", summary: "Terminé", report: "Source créée, testée; Git status et Git diff réels vérifiés." },
+  ], false, { commandResults: [{ stdout: "PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 }] });
+  const result = await target.runner.run("user-a", "conversation-a", "Inspecte puis crée la source, lance les tests et vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.runCreates(), 1);
+  assert.deepEqual(target.lists, [".", "src"]);
+  assert.equal((target.steps.find((step) => step.summary === "Lister src")?.input as Record<string, unknown>)?.path, "src");
+  assert.equal(target.steps.find((step) => step.summary === "Écriture incomplète")?.status, "FAILED");
+  assert.equal(target.steps.find((step) => step.summary === "Écrire source")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.deepEqual(target.steps.map((step) => step.stepNumber), target.steps.map((_step, index) => index + 1));
+  assert.equal(new Set(target.steps.map((step) => step.stepNumber)).size, target.steps.length);
+  assert.match(String(target.run()?.finalReport), /Git status et Git diff réels/);
+});
+
+test("migration AgentRun aligne idempotemment objective sur la limite 50000", () => {
+  const sql = fs.readFileSync("supabase/migrations/20260825_forge_agent_objective_length.sql", "utf8");
+  assert.match(sql, /drop constraint if exists forge_agent_runs_objective_check/i);
+  assert.match(sql, /add constraint forge_agent_runs_objective_check/i);
+  assert.match(sql, /length\(objective\) between 1 and 50000/i);
+  assert.doesNotMatch(sql, /drop table|truncate/i);
+});
+
+test("diagnostic de persistance expose seulement opération et code sûrs", () => {
+  const source = fs.readFileSync("lib/forge/agent-store.ts", "utf8");
+  assert.match(source, /Forge agent persistence failure/);
+  assert.match(source, /\{ operation, code \}/);
+  assert.match(source, /Persistance Forge impossible \(\$\{operation\}, code \$\{code\}\)/);
+  assert.doesNotMatch(source, /console\.error\([^\n]*(?:path|body|userId|runId|token|secret)/i);
 });
