@@ -2,9 +2,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { Daytona, DaytonaFileAccessDeniedError, DaytonaInvalidFilePathError, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError, SandboxState, type Sandbox } from "@daytona/sdk";
 import { FORGE_RUNTIME_LIMITS, ForgeRuntimeError, normalizeRuntimePath, type ForgeRuntime, type ForgeRuntimeCommand, type ForgeRuntimeCommandResult, type ForgeRuntimeFileEntry, type ForgeRuntimeProvider, type ForgeRuntimeSource } from "./runtime-foundation";
-import { parseGitPorcelain, quoteSandboxArgument } from "./daytona-foundation";
+import { DAYTONA_REPOSITORY_ROOT, parseGitPorcelain, quoteSandboxArgument, resolveDaytonaRepositoryCwd } from "./daytona-foundation";
 
-const ROOT = "repo", TTL = 60, STATUS_BYTES = 1_000_000;
+const ROOT = DAYTONA_REPOSITORY_ROOT, TTL = 60, STATUS_BYTES = 1_000_000;
 function daytona() {
   const apiKey = process.env.DAYTONA_API_KEY?.trim();
   if (!apiKey) throw new ForgeRuntimeError("UNAVAILABLE", "Le provider Daytona n'est pas configure.");
@@ -117,12 +117,16 @@ export const daytonaRuntimeProvider: ForgeRuntimeProvider = {
     const sandbox = await sandboxFor(runtime), started = Date.now(), session = "forge-" + runtime.runtimeId + "-" + randomUUID();
     try {
       await sandbox.process.createSession(session);
+      const cwd = resolveDaytonaRepositoryCwd(command.cwd);
+      const changedDirectory = await sandbox.process.executeSessionCommand(session, { command: "cd " + quoteSandboxArgument(cwd), runAsync: false, suppressInputEcho: true }, Math.ceil(command.timeoutMs / 1000));
+      if (changedDirectory.exitCode !== 0) throw new ForgeRuntimeError("INVALID_INPUT", "Le dossier de travail runtime n'existe pas dans le repository.");
       const request = [command.command, ...command.args].map(quoteSandboxArgument).join(" ");
       const response = await sandbox.process.executeSessionCommand(session, { command: request, runAsync: false, suppressInputEcho: true }, Math.ceil(command.timeoutMs / 1000));
       const stdout = bound(response.stdout || "", command.maxOutputBytes), stderr = bound(response.stderr || "", Math.max(0, command.maxOutputBytes - stdout.bytes));
       return { stdout: stdout.value, stderr: stderr.value, exitCode: response.exitCode ?? null, timedOut: false, truncated: stdout.truncated || stderr.truncated, durationMs: Date.now() - started };
     } catch (error) {
       if (error instanceof DaytonaProcessExecutionTimeoutError) return { stdout: "", stderr: "", exitCode: null, timedOut: true, truncated: false, durationMs: Date.now() - started };
+      if (error instanceof ForgeRuntimeError) throw error;
       throw new ForgeRuntimeError("UNAVAILABLE", "La commande Daytona a echoue.");
     } finally { try { await sandbox.process.deleteSession(session); } catch { /* The bounded command has already ended. */ } }
   },

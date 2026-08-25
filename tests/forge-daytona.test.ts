@@ -3,7 +3,7 @@ const daytonaAssert = require("node:assert/strict");
 const daytonaTest = require("node:test");
 const daytonaFs = require("node:fs");
 const daytonaPath = require("node:path");
-const { parseGitPorcelain, quoteSandboxArgument } = require("../lib/forge/daytona-foundation.ts");
+const { parseGitPorcelain, quoteSandboxArgument, resolveDaytonaRepositoryCwd } = require("../lib/forge/daytona-foundation.ts");
 const provider = daytonaFs.readFileSync("lib/forge/daytona-runtime-provider.ts", "utf8");
 const github = daytonaFs.readFileSync("lib/forge/github-provider.ts", "utf8");
 const runtimeRoot = "app/api/forge/conversations/[conversationId]/workspace/runtime";
@@ -16,6 +16,15 @@ daytonaTest("SDK Daytona officiel est fixe", () => {
 daytonaTest("arguments sandbox sont cites sans permettre une injection shell", () => {
   daytonaAssert.equal(quoteSandboxArgument("src/a b.ts"), "'src/a b.ts'");
   daytonaAssert.equal(quoteSandboxArgument("a'b"), "'a'\"'\"'b'");
+});
+
+daytonaTest("run_command resout cwd depuis la racine repository Daytona", () => {
+  daytonaAssert.equal(resolveDaytonaRepositoryCwd(), "repo");
+  daytonaAssert.equal(resolveDaytonaRepositoryCwd("."), "repo");
+  daytonaAssert.equal(resolveDaytonaRepositoryCwd("packages/app"), "repo/packages/app");
+  daytonaAssert.throws(() => resolveDaytonaRepositoryCwd("../"));
+  daytonaAssert.throws(() => resolveDaytonaRepositoryCwd("/home/daytona"));
+  daytonaAssert.match(provider, /executeSessionCommand\(session, \{ command: "cd " \+ quoteSandboxArgument\(cwd\)/);
 });
 
 daytonaTest("git status classe added modified deleted", () => {

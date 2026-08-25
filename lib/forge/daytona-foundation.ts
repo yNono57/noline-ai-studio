@@ -1,4 +1,11 @@
-import type { ForgeRuntimeGitStatus } from "./runtime-foundation";
+import { normalizeRuntimePath, type ForgeRuntimeGitStatus } from "./runtime-foundation";
+
+export const DAYTONA_REPOSITORY_ROOT = "repo";
+
+export function resolveDaytonaRepositoryCwd(cwd = ".") {
+  const normalized = normalizeRuntimePath(cwd, true);
+  return normalized === "." ? DAYTONA_REPOSITORY_ROOT : `${DAYTONA_REPOSITORY_ROOT}/${normalized}`;
+}
 
 export function quoteSandboxArgument(value: string) { return "'" + value.replace(/'/g, "'\"'\"'") + "'"; }
 

@@ -24,6 +24,7 @@ type ForgeValidationRecovery = {
   filesReadSinceFailure: Set<string>;
   candidateFiles: string[];
   correctionMutationVersion: number | null;
+  failureKind: "VALIDATION" | "COMMAND_CWD";
 };
 export type ForgeAgentPhase = "NORMAL" | "DIAGNOSTIC" | "CORRECTION_REQUIRED" | "REVALIDATION_REQUIRED";
 export type ForgeAgentDecisionConstraint = { phase: ForgeAgentPhase; allowedDecisionTypes: ForgeAgentDecision["type"][]; allowedTools: ForgeAgentToolName[]; instruction: string };
@@ -170,7 +171,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             if (validation) validationFailed = commandFailed;
             const persistedSummary = summarizeToolResult(decision.tool, result, false, decision.input);
             const modelSummary = commandFailed
-              ? commandFailureRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion)
+              ? commandFailureRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null)
               : summarizeToolResult(decision.tool, result, true, decision.input);
             const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: persistedSummary, status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() });
             if (decision.tool === "run_command") inspectionRevision += 1;
@@ -179,7 +180,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               prematureTerminations = 0;
               if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: modelSummary });
               lastRecoverableFailure = modelSummary;
-              if (validation) validationRecovery = createValidationRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion);
+              if (validation) { validationRecovery = createValidationRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null); if (validationRecovery.failureKind === "COMMAND_CWD" && commandKey) failedValidationCommands.delete(commandKey); }
             }
             else {
               successfulToolCalls += 1;
@@ -187,7 +188,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               prematureTerminations = 0;
               if (commandKey) failedValidationCommands.delete(commandKey);
               if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
-              if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && validationRecovery && mutationVersion > validationRecovery.failureMutationVersion) validationRecovery = null; }
+              if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && validationRecovery && (mutationVersion > validationRecovery.failureMutationVersion || validationRecovery.failureKind === "COMMAND_CWD")) validationRecovery = null; }
               if (decision.tool === "list_files" || decision.tool === "read_file") { successfulInspections.add(inspectionSignature); inspectionSatisfied = true; }
               if (validationRecovery && decision.tool === "list_files") validationRecovery.inspectionsSinceFailure.add(normalizeAgentPath(decision.input.path ?? ".", true));
               if (validationRecovery && decision.tool === "read_file") { const path = normalizeAgentPath(decision.input.path); validationRecovery.inspectionsSinceFailure.add(path); validationRecovery.filesReadSinceFailure.add(path); }
@@ -367,10 +368,11 @@ function completionRecoveryMessage(attempt: number, missing: string[], inspectio
   const phase = validationRecovery ? validationRecoveryInstruction(validationRecovery) : "";
   return sanitizeAgentText(`${reason}${toolFailure}${repositoryState}RECOVERY: terminaison refusée. Mission incomplète. Obligations restantes:\n- ${missing.join("\n- ")}\n${phase || "Poursuis avec le TOOL_CALL de la prochaine obligation; n'effectue pas une nouvelle inspection identique."} Tentative globale=${attempt}.`, 4000);
 }
-function createValidationRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number): ForgeValidationRecovery {
+function createValidationRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number, repositoryPackageObserved: boolean): ForgeValidationRecovery {
   const safe = safeToolInput("run_command", input);
   const stdout = sanitizeAgentText(result.stdout || "", 4_000);
   const stderr = sanitizeAgentText(result.stderr || "", 4_000);
+  const commandCwdMismatch = repositoryPackageObserved && /ENOENT[\s\S]*\/home\/daytona\/package\.json/i.test(`${stdout}\n${stderr}`);
   return {
     command: String(safe.command || ""),
     args: safeCommandArgs(safe.args),
@@ -383,9 +385,10 @@ function createValidationRecovery(input: Record<string, unknown>, result: ForgeR
     filesystemRevision,
     inspectionsSinceFailure: new Set<string>(),
     filesReadSinceFailure: new Set<string>(),
-    candidateFiles: extractRecoveryCandidatePaths(`${stdout}
+    candidateFiles: commandCwdMismatch ? [] : extractRecoveryCandidatePaths(`${stdout}
 ${stderr}`),
-    correctionMutationVersion: null,
+    correctionMutationVersion: commandCwdMismatch ? mutationRevision : null,
+    failureKind: commandCwdMismatch ? "COMMAND_CWD" : "VALIDATION",
   };
 }
 function extractRecoveryCandidatePaths(output: string) {
@@ -406,6 +409,7 @@ function validationRecoveryInstruction(recovery: ForgeValidationRecovery) {
   const unreadCandidate = recovery.candidateFiles.find((path) => !recovery.filesReadSinceFailure.has(path));
   const command = [recovery.command, ...recovery.args].join(" ");
   const evidence = `Dernière validation réelle: ${command}; cwd=${recovery.cwd}; exitCode=${recovery.exitCode ?? "null"}; timedOut=${recovery.timedOut}; filesystemRevision=${recovery.filesystemRevision}; mutationRevision=${recovery.failureMutationVersion}; stdout=${recovery.stdout || "(vide)"}; stderr=${recovery.stderr || "(vide)"}.`;
+  if (recovery.failureKind === "COMMAND_CWD") return `${evidence} COMMAND_CWD_MISMATCH: package.json a déjà été lu dans le repository; ne le crée ni ne le réécris. Le provider résout désormais cwd relativement à la racine repository. PHASE OBLIGATOIRE: REVALIDATION avec la même commande.`;
   if (recovery.correctionMutationVersion !== null) return `${evidence} PHASE OBLIGATOIRE: REVALIDATION. La correction existe à mutationRevision=${recovery.correctionMutationVersion}; relance cette validation (ou une validation réellement disponible équivalente) avec run_command validation=true. FINAL/FAIL refusés avant succès.`;
   if (unreadCandidate) return `${evidence} PHASE OBLIGATOIRE: DIAGNOSTIC. Lis le fichier candidat sûr ${unreadCandidate} avec read_file, puis corrige-le avec write_file/delete_file. Une inspection seule ne satisfait pas la recovery.`;
   if (recovery.filesReadSinceFailure.size > 0) return `${evidence} PHASE OBLIGATOIRE: CORRECTION. Les fichiers lus depuis l'échec sont ${[...recovery.filesReadSinceFailure].join(", ")}. Le prochain progrès attendu est write_file/delete_file; FINAL/FAIL et nouvelle inspection générique sont refusés.`;
@@ -444,10 +448,11 @@ function parsePackageScripts(content: string) {
     return new Set(Object.entries(parsed.scripts).filter((entry) => typeof entry[1] === "string").map((entry) => entry[0]));
   } catch { return null; }
 }
-function commandFailureRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number) {
+function commandFailureRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number, repositoryPackageObserved: boolean) {
   const safe = safeToolInput("run_command", input);
   const stdout = sanitizeAgentText(result.stdout || "", 3500);
   const stderr = sanitizeAgentText(result.stderr || "", 3500);
+  if (repositoryPackageObserved && /ENOENT[\s\S]*\/home\/daytona\/package\.json/i.test(`${stdout}\n${stderr}`)) return sanitizeAgentText(`COMMAND_CWD_MISMATCH: package.json existe dans le repository, mais la commande a cherché /home/daytona/package.json. Ne crée ni ne réécris package.json; relance la validation depuis la racine repository. filesystemRevision=${filesystemRevision} mutationRevision=${mutationRevision}.`, 2000);
   return sanitizeAgentText(`COMMAND_EXECUTED_NONZERO: tool=run_command command=${String(safe.command || "")} args=${JSON.stringify(safe.args || [])} cwd=${String(safe.cwd || ".")} exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${stdout || "(vide)"} stderr=${stderr || "(vide)"} filesystemRevision=${filesystemRevision} mutationRevision=${mutationRevision}. La commande était valide et a réellement été exécutée; ce n'est pas un input invalide ni un blocker provider. Analyse les sorties, inspecte les fichiers concernés puis corrige avec write_file/delete_file. Un retry identique est interdit avant mutation.`, 8000);
 }
 async function executeTool(runtime: ForgeAgentRuntimeAdapter, tool: ForgeAgentToolName, input: Record<string, unknown>): Promise<unknown> { if (tool === "list_files") return runtime.listFiles(normalizeAgentPath(input.path ?? ".", true)); if (tool === "read_file") return runtime.readFile(normalizeAgentPath(input.path)); if (tool === "write_file") { if (typeof input.content !== "string") throw new ForgeAgentError("INVALID_INPUT", "Contenu fichier invalide."); const path = normalizeAgentPath(input.path); const written = await runtime.writeFile(path, input.content); const verified = await runtime.readFile(path); if (verified.content !== input.content) throw new ForgeAgentError("PERSISTENCE", "Le contenu relu ne correspond pas exactement au contenu écrit."); return written; } if (tool === "delete_file") return runtime.deleteFile(normalizeAgentPath(input.path)); if (tool === "run_command") return runtime.executeCommand(normalizeAgentCommand(input)); if (tool === "git_status") return runtime.getGitStatus(); if (tool === "git_diff") return runtime.getGitDiff(); throw new ForgeAgentError("INVALID_INPUT", "Outil Forge inconnu."); }

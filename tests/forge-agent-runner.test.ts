@@ -642,3 +642,28 @@ test("vrai anti-loop refuse trois terminaisons incompatibles sans consommer de s
   assert.equal(target.constraints.filter((constraint) => constraint?.phase === "CORRECTION_REQUIRED").length, 3);
   assert.ok(target.commands.length < FORGE_AGENT_LIMITS.maxToolCalls);
 });
+test("ENOENT du cwd Daytona ne transforme pas package.json repository en fichier absent", async () => {
+  const typecheck = { type: "TOOL_CALL", summary: "Typecheck", tool: "run_command", input: { command: "npm", args: ["run", "typecheck"], validation: true } };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    typecheck,
+    (_context: Record<string, unknown>, constraint?: Record<string, unknown>) => {
+      assert.equal(constraint?.phase, "REVALIDATION_REQUIRED");
+      assert.match(String(constraint?.instruction), /COMMAND_CWD_MISMATCH/);
+      assert.match(String(constraint?.instruction), /ne le crée ni ne le réécris/);
+      return typecheck;
+    },
+    { type: "FINAL", summary: "Terminé", report: "package.json a été lu dans le repository et npm run typecheck a réellement réussi depuis sa racine." },
+  ], false, {
+    files: { "package.json": '{"scripts":{"typecheck":"tsc --noEmit"}}' },
+    commandResults: [
+      { stdout: "", stderr: "npm error code ENOENT\nnpm error path /home/daytona/package.json", exitCode: 254, timedOut: false, truncated: false, durationMs: 5 },
+      { stdout: "typecheck PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 5 },
+    ],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Lis package.json puis lance npm run typecheck.");
+  assert.equal(result.status, "COMPLETED");
+  assert.deepEqual(target.reads, ["package.json"]);
+  assert.equal(target.writes.includes("package.json"), false);
+  assert.equal(target.commands.length, 2);
+});
