@@ -545,6 +545,72 @@ test("budget Forge reste borné à 60 étapes, 48 outils et contraintes SQL alig
 });
 
 
+test("repository minimal: validation npm non applicable quitte la recovery sans mutation corrective artificielle", async () => {
+  const fileContent = "NØLINE Forge V1.5 live publication test";
+  const realPatch = `diff --git a/forge-v15-live-test.txt b/forge-v15-live-test.txt
+new file mode 100644
+--- /dev/null
++++ b/forge-v15-live-test.txt
+@@ -0,0 +1 @@
++${fileContent}`;
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Inspecter le repository minimal", tool: "list_files", input: { path: "." } },
+    { type: "TOOL_CALL", summary: "Lire README", tool: "read_file", input: { path: "README.md" } },
+    { type: "TOOL_CALL", summary: "Créer le fichier de test", tool: "write_file", input: { path: "forge-v15-live-test.txt", content: fileContent } },
+    { type: "TOOL_CALL", summary: "Relire le fichier de test", tool: "read_file", input: { path: "forge-v15-live-test.txt" } },
+    { type: "TOOL_CALL", summary: "Tester npm si applicable", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
+    (context: Record<string, unknown>, constraint?: Record<string, unknown>) => {
+      assert.equal(constraint?.phase, "NORMAL");
+      assert.match(JSON.stringify(context), /VALIDATION_NOT_APPLICABLE/);
+      return { type: "TOOL_CALL", summary: "Vérifier Git status", tool: "git_status", input: {} };
+    },
+    { type: "TOOL_CALL", summary: "Vérifier Git diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Mission terminée", report: "Le fichier demandé existe avec le contenu exact; validation npm non applicable; Git status et Git diff réels vérifiés." },
+  ], false, {
+    entries: [{ path: "README.md", type: "file", size: 48 }],
+    files: { "README.md": "# Forge Testbed\nRepository minimal de validation Forge." },
+    missingFiles: ["package.json"],
+    commandResults: [{ stdout: "", stderr: "npm error code ENOENT\nnpm error path /home/daytona/repo/package.json", exitCode: 254, timedOut: false, truncated: false, durationMs: 5 }],
+    gitDiff: { added: ["forge-v15-live-test.txt"], modified: [], deleted: [], patch: realPatch, truncated: false },
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Crée forge-v15-live-test.txt contenant exactement NØLINE Forge V1.5 live publication test, puis valide si applicable et vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.files.get("forge-v15-live-test.txt"), fileContent);
+  assert.equal(target.writes.filter((path: string) => path === "forge-v15-live-test.txt").length, 1);
+  assert.equal(target.writes.includes("package.json"), false);
+  assert.ok(target.reads.includes("README.md"));
+  assert.ok(target.reads.includes("forge-v15-live-test.txt"));
+  assert.equal(target.reads.includes("package.json"), false);
+  assert.equal(target.commands.length, 1);
+  assert.equal(target.constraints.some((constraint) => constraint?.phase === "CORRECTION_REQUIRED"), false);
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.equal(target.artifacts.length, 1);
+  assert.equal(target.artifacts[0]?.patch, realPatch);
+  assert.ok(target.events.indexOf("ARTIFACT") < target.events.lastIndexOf("FINAL"));
+});
+
+test("validation réellement disponible en échec reste bloquée en correction et interdit COMPLETED", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build réel", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const premature = { type: "FINAL", summary: "Faux succès", report: "Le build est terminé." };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "TOOL_CALL", summary: "Modifier le code", tool: "write_file", input: { path: "src/App.tsx", content: "broken" } },
+    build,
+    premature,
+    premature,
+    premature,
+  ], false, {
+    files: { "package.json": '{"scripts":{"build":"vite build"}}', "src/App.tsx": "before" },
+    commandResults: [{ stdout: "", stderr: "src/App.tsx:1:1 TypeScript error", exitCode: 1, timedOut: false, truncated: false, durationMs: 5 }],
+  });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Modifie src/App.tsx puis exécute le build disponible."), /aucune action compatible avec la phase CORRECTION_REQUIRED/);
+  assert.equal(target.run()?.status, "FAILED");
+  assert.equal(target.commands.length, 1);
+  assert.equal(target.artifacts.length, 0);
+  assert.equal(target.steps.some((step) => step.type === "FINAL" && step.status === "COMPLETED"), false);
+  assert.ok(target.constraints.some((constraint) => constraint?.phase === "CORRECTION_REQUIRED"));
+});
 test("validation npm non nulle impose correction puis autorise la revalidation exacte", async () => {
   const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
   const premature = { type: "FINAL", summary: "Mission incomplète", report: "Je termine sans corriger." };

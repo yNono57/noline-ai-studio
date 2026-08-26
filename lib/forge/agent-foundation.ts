@@ -145,9 +145,9 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           if (requestedNpmScript && packageScripts && !packageScripts.has(requestedNpmScript)) {
             stalledDecisions += 1;
             validationAttempted = true;
-            validationFailed = true;
+            validationFailed = false;
             const available = [...packageScripts.keys()].sort();
-            const recovery = sanitizeAgentText(`NPM_SCRIPT_UNAVAILABLE: le script ${requestedNpmScript} n'existe pas dans package.json. Scripts observés: ${available.length ? available.join(", ") : "aucun"}. Aucun appel runtime effectué. Crée/corrige le script demandé avec write_file ou utilise une validation réellement disponible; ne répète pas cette commande sans mutation. mutationRevision=${mutationVersion}.`, 2200);
+            const recovery = sanitizeAgentText(`NPM_SCRIPT_UNAVAILABLE: le script ${requestedNpmScript} n'existe pas dans package.json. Scripts observés: ${available.length ? available.join(", ") : "aucun"}. Aucun appel runtime effectué. Cette validation est indisponible et n'impose aucune mutation corrective, sauf si la mission demande explicitement de créer ce script. Utilise uniquement les validations réellement disponibles, puis poursuis avec les autres completion gates; ne répète pas cette commande. mutationRevision=${mutationVersion}.`, 2400);
             if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: recovery });
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: "Script npm indisponible", tool: decision.tool, input: safeInput, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
             if (stalledDecisions >= 4) throw new ForgeAgentError("MODEL", "Le modèle Forge répète une validation indisponible sans corriger package.json.");
@@ -176,19 +176,28 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           try {
             const result = await executeTool(deps.runtime(userId, conversationId), decision.tool, decision.input);
             const commandFailed = decision.tool === "run_command" && ((result as ForgeRuntimeCommandResult).timedOut || (result as ForgeRuntimeCommandResult).exitCode !== 0);
-            if (validation) validationFailed = commandFailed;
+            const npmValidationNotApplicable = Boolean(validation && commandFailed && requestedNpmScript && packageScripts === null && isMissingRepositoryPackageManifest(result as ForgeRuntimeCommandResult));
+            if (validation) validationFailed = commandFailed && !npmValidationNotApplicable;
             const persistedSummary = summarizeToolResult(decision.tool, result, false, decision.input);
-            const modelSummary = commandFailed
-              ? commandFailureRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null)
-              : summarizeToolResult(decision.tool, result, true, decision.input);
+            const modelSummary = npmValidationNotApplicable
+              ? sanitizeAgentText(`VALIDATION_NOT_APPLICABLE: package.json est absent de la racine du repository observé. npm run ${requestedNpmScript} n'est pas une validation disponible et n'impose aucune mutation corrective. Ne crée pas package.json artificiellement; poursuis avec les validations réellement disponibles, puis git_status, git_diff et FINAL.`, 1800)
+              : commandFailed
+                ? commandFailureRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null)
+                : summarizeToolResult(decision.tool, result, true, decision.input);
             const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: persistedSummary, status: commandFailed ? "FAILED" : "COMPLETED", completedAt: deps.now() });
             if (decision.tool === "run_command") inspectionRevision += 1;
             if (commandFailed) {
               stalledDecisions = 0;
               prematureTerminations = 0;
-              if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: modelSummary });
               lastRecoverableFailure = modelSummary;
-              if (validation) { validationRecovery = createValidationRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null); if (validationRecovery.failureKind === "COMMAND_CWD" && commandKey) failedValidationCommands.delete(commandKey); }
+              if (npmValidationNotApplicable) {
+                packageScripts = new Map();
+                validationRecovery = null;
+                if (commandKey) failedValidationCommands.delete(commandKey);
+              } else {
+                if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: modelSummary });
+                if (validation) { validationRecovery = createValidationRecovery(decision.input, result as ForgeRuntimeCommandResult, inspectionRevision, mutationVersion, packageScripts !== null); if (validationRecovery.failureKind === "COMMAND_CWD" && commandKey) failedValidationCommands.delete(commandKey); }
+              }
             }
             else {
               successfulToolCalls += 1;
@@ -215,18 +224,28 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             if (decision.tool === "run_command") inspectionRevision += 1;
             failedCalls.set(signature, 1);
             const missingOptionalFile = decision.tool === "read_file" && hasErrorCode(error, "NOT_FOUND");
+            const missingPackageManifest = missingOptionalFile && normalizeAgentPath(decision.input.path) === "package.json";
+            const npmValidationNotApplicable = missingPackageManifest && validationRecovery?.command.toLowerCase() === "npm";
             if (missingOptionalFile) stalledDecisions = 0;
             if (missingOptionalFile) knownMissingInspections.add(inspectionSignature);
             if (missingOptionalFile && validationRecovery && decision.tool === "read_file") { const missingPath = normalizeAgentPath(decision.input.path); validationRecovery.inspectionsSinceFailure.add(missingPath); validationRecovery.candidateFiles = validationRecovery.candidateFiles.filter((path) => path !== missingPath); }
+            if (missingPackageManifest) packageScripts = new Map();
+            if (npmValidationNotApplicable) {
+              validationRecovery = null;
+              validationFailed = false;
+              for (const key of failedValidationCommands.keys()) if (/"command":"npm"/i.test(key)) failedValidationCommands.delete(key);
+            }
             if (!missingOptionalFile && isBlockingToolError(error)) blockingToolFailures += 1;
             const reason = sanitizeAgentText(error instanceof Error ? error.message : "Outil en échec.", 1000);
             const code = getErrorCode(error);
-            const actionable = missingOptionalFile
-              ? sanitizeAgentText(`OPTIONAL FILE ABSENT: ${reason} Cette absence est une information d'inspection, pas un blocker runtime. N'essaie pas de relire ce chemin; poursuis avec la prochaine obligation.`, 1400)
-              : decision.tool === "run_command" && code === "INVALID_INPUT"
-                ? invalidRunCommandRecovery(safeInput, reason)
-                : sanitizeAgentText(`TOOL ERROR [${code}] tool=${decision.tool} input=${JSON.stringify(safeInput)}: ${reason} Prochaine action: corrige cet input ou utilise un autre outil autorisé; git_status/git_diff sont des outils dédiés.`, 1800);
-            if (!missingOptionalFile && !isBlockingToolError(error)) lastRecoverableFailure = actionable;
+            const actionable = npmValidationNotApplicable
+              ? sanitizeAgentText(`VALIDATION_NOT_APPLICABLE: ${reason} package.json est absent du repository observé; la commande npm précédente n'est donc pas une validation disponible et n'impose aucune mutation corrective. Ne crée pas package.json pour satisfaire artificiellement une gate. Poursuis avec les validations réellement disponibles, puis git_status, git_diff et FINAL.`, 1800)
+              : missingOptionalFile
+                ? sanitizeAgentText(`OPTIONAL FILE ABSENT: ${reason} Cette absence est une information d'inspection, pas un blocker runtime. N'essaie pas de relire ce chemin; poursuis avec la prochaine obligation.`, 1400)
+                : decision.tool === "run_command" && code === "INVALID_INPUT"
+                  ? invalidRunCommandRecovery(safeInput, reason)
+                  : sanitizeAgentText(`TOOL ERROR [${code}] tool=${decision.tool} input=${JSON.stringify(safeInput)}: ${reason} Prochaine action: corrige cet input ou utilise un autre outil autorisé; git_status/git_diff sont des outils dédiés.`, 1800);
+            if (npmValidationNotApplicable || (!missingOptionalFile && !isBlockingToolError(error))) lastRecoverableFailure = actionable;
             const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: actionable, status: "FAILED", completedAt: deps.now() });
             steps.push({ ...failed, resultSummary: actionable });
             run = await deps.updateRun(userId, run.runId, { status: "RUNNING", lastActivityAt: deps.now() });
@@ -390,6 +409,12 @@ function completionRecoveryMessage(attempt: number, missing: string[], inspectio
   const phase = validationRecovery ? validationRecoveryInstruction(validationRecovery) : "";
   return sanitizeAgentText(`${reason}${toolFailure}${repositoryState}RECOVERY: terminaison refusée. Mission incomplète. Obligations restantes:\n- ${missing.join("\n- ")}\n${phase || "Poursuis avec le TOOL_CALL de la prochaine obligation; n'effectue pas une nouvelle inspection identique."} Tentative globale=${attempt}.`, 4000);
 }
+function isMissingRepositoryPackageManifest(result: ForgeRuntimeCommandResult) {
+  const output = `${result.stdout || ""}
+${result.stderr || ""}`.toLowerCase();
+  const missingManifestMessage = output.includes("could not read package.json") || output.includes("could not find package.json");
+  return (output.includes("enoent") && output.includes("/home/daytona/repo/package.json")) || missingManifestMessage;
+}
 function createValidationRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number, repositoryPackageObserved: boolean): ForgeValidationRecovery {
   const safe = safeToolInput("run_command", input);
   const stdout = sanitizeAgentText(result.stdout || "", 4_000);
@@ -460,8 +485,10 @@ function isMinimalRepositoryListing(result: unknown) {
 }
 
 function npmScriptName(input: Record<string, unknown>) {
-  if (input.command !== "npm" || !Array.isArray(input.args) || input.args[0] !== "run" || typeof input.args[1] !== "string") return null;
-  return input.args[1];
+  if (input.command !== "npm" || !Array.isArray(input.args)) return null;
+  if ((input.args[0] === "run" || input.args[0] === "run-script") && typeof input.args[1] === "string") return input.args[1];
+  if (input.args.length === 1 && input.args[0] === "test") return "test";
+  return null;
 }
 function parsePackageScripts(content: string) {
   try {
