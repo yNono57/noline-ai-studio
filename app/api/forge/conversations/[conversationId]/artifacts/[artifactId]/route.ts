@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: Context) {
       : action === "branch" ? await forgeContinuityService.createBranch(user.id, conversationId, artifactId, body.branch)
       : action === "commit" ? await forgeContinuityService.commit(user.id, conversationId, artifactId, body.message, body.confirmed)
       : action === "push" ? await forgeContinuityService.push(user.id, conversationId, artifactId, body.confirmed)
-      : action === "pull_request" ? await forgeContinuityService.createPullRequest(user.id, conversationId, artifactId, body.title, body.confirmed)
+      : action === "pull_request" ? await forgeContinuityService.createPullRequest(user.id, conversationId, artifactId, body.title, body.description, body.confirmed)
       : (() => { throw new ForgeAgentError("INVALID_INPUT", "Action de continuité inconnue."); })();
     return NextResponse.json({ artifact });
   } catch (error) { return agentErrorResponse(error); }

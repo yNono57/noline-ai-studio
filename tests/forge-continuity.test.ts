@@ -11,7 +11,7 @@ function artifact(overrides: Record<string, unknown> = {}) {
     changedFiles: ["src/app.ts"], additions: 1, deletions: 1,
     patch: "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new",
     status: "READY", createdAt: "2026-08-26T00:00:00.000Z", restoreStatus: "AVAILABLE", publicationStatus: "LOCAL",
-    restoredAt: null, restoredRuntimeId: null, branchName: null, commitSha: null, pullRequestUrl: null, conflictFiles: [], ...overrides,
+    restoredAt: null, restoredRuntimeId: null, branchName: null, commitSha: null, pullRequestUrl: null, remoteBranch: null, pullRequestNumber: null, pullRequestTarget: null, publishedAt: null, pullRequestCreatedAt: null, conflictFiles: [], ...overrides,
   };
 }
 function result(exitCode = 0, stdout = "", stderr = "") { return { stdout, stderr, exitCode, timedOut: false, truncated: false, durationMs: 1 }; }
@@ -33,8 +33,8 @@ function harness(options: { artifact?: Record<string, unknown> | null; runConver
       async getGitStatus() { statusCalls += 1; return statusCalls === 1 ? (options.initialStatus || { added: [], modified: [], deleted: [] }) : (options.status || { added: [], modified: ["src/app.ts"], deleted: [] }); },
       async getGitDiff() { return options.diff || { added: [], modified: ["src/app.ts"], deleted: [], patch: (current as Record<string, unknown>).patch, truncated: false }; },
     }; },
-    async getPushCredential() { return { username: "x-access-token", password: "secret-token" }; },
-    async createPullRequest() { return { url: "https://github.com/owner/repo/pull/1" }; },
+    async preparePush() { return { username: "x-access-token", password: "secret-token", remoteSha: null }; },
+    async createPullRequest() { return { number: 1, url: "https://github.com/owner/repo/pull/1", createdAt: "2026-08-26T01:00:00.000Z" }; },
     now: () => "2026-08-26T01:00:00.000Z",
   });
   return { service, artifact: () => current, commands, writes, deletes, updates };

@@ -4,6 +4,7 @@ import { createForgeContinuityService } from "./continuity-foundation";
 import { getAgentRun, getAgentRunArtifactById, listProjectAgentRunArtifacts, updateAgentRunArtifact } from "./agent-store";
 import { forgeWorkspaceService } from "./workspace-runtime";
 import { forgeRuntimeService } from "./runtime-runtime";
+import { githubPublicationProvider } from "./github-publication-provider";
 
 export const forgeContinuityService = createForgeContinuityService({
   getWorkspace: (userId, conversationId) => forgeWorkspaceService.get(userId, conversationId),
@@ -18,6 +19,8 @@ export const forgeContinuityService = createForgeContinuityService({
     getGitStatus: () => forgeRuntimeService.getGitStatus(userId, conversationId),
     getGitDiff: () => forgeRuntimeService.getGitDiff(userId, conversationId),
   }),
+  preparePush: (userId, repository, branch) => githubPublicationProvider.preparePush(userId, repository, branch),
+  createPullRequest: (userId, input) => githubPublicationProvider.createPullRequest(userId, input),
   now: () => new Date().toISOString(),
 });
 

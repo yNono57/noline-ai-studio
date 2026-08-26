@@ -3,19 +3,10 @@ import { ForgeAgentError, type ForgeAgentRun, type ForgeRunArtifact } from "./ag
 
 export type ForgeArtifactRestoreStatus = "AVAILABLE" | "RESTORING" | "RESTORED" | "CONFLICT" | "FAILED";
 export type ForgeArtifactPublicationStatus = "LOCAL" | "BRANCHED" | "COMMITTED" | "PUSHED" | "PR_CREATED";
-export type ForgeContinuityArtifact = ForgeRunArtifact & {
-  restoreStatus: ForgeArtifactRestoreStatus;
-  publicationStatus: ForgeArtifactPublicationStatus;
-  restoredAt: string | null;
-  restoredRuntimeId: string | null;
-  branchName: string | null;
-  commitSha: string | null;
-  pullRequestUrl: string | null;
-  conflictFiles: string[];
-};
+export type ForgeContinuityArtifact = ForgeRunArtifact;
 export type ForgeContinuityWorkspace = { workspaceId: string; projectId: string; conversationId: string; repository: string; branch: string; baseCommitSha: string; status: string };
 export type ForgeContinuityRuntime = { runtimeId: string; status: string; baseCommitSha: string };
-type ArtifactUpdate = Partial<Pick<ForgeContinuityArtifact, "restoreStatus" | "publicationStatus" | "restoredAt" | "restoredRuntimeId" | "branchName" | "commitSha" | "pullRequestUrl" | "conflictFiles">>;
+type ArtifactUpdate = Partial<Pick<ForgeContinuityArtifact, "restoreStatus" | "publicationStatus" | "restoredAt" | "restoredRuntimeId" | "branchName" | "commitSha" | "pullRequestUrl" | "remoteBranch" | "pullRequestNumber" | "pullRequestTarget" | "publishedAt" | "pullRequestCreatedAt" | "conflictFiles">>;
 export type ForgeContinuityRuntimeAdapter = {
   writeFile(path: string, content: string): Promise<unknown>;
   deleteFile(path: string): Promise<void>;
@@ -30,77 +21,79 @@ export type ForgeContinuityDependencies = {
   getRun(userId: string, runId: string): Promise<ForgeAgentRun | null>;
   updateArtifact(userId: string, artifactId: string, update: ArtifactUpdate): Promise<ForgeContinuityArtifact>;
   runtime(userId: string, conversationId: string): ForgeContinuityRuntimeAdapter;
-  getPushCredential?(userId: string, repository: string): Promise<{ username: string; password: string }>;
-  createPullRequest?(userId: string, input: { repository: string; head: string; base: string; title: string; body: string }): Promise<{ url: string }>;
+  preparePush?(userId: string, repository: string, branch: string): Promise<{ username: string; password: string; remoteSha: string | null }>;
+  createPullRequest?(userId: string, input: { repository: string; head: string; base: string; title: string; body: string }): Promise<{ number: number; url: string; createdAt: string }>;
   now(): string;
 };
 
 const sensitivePath = /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.npmrc|\.pypirc|id_rsa|id_ed25519|credentials?|secrets?)(\/|$)/i;
 export function assertContinuityPatchSafe(artifact: ForgeContinuityArtifact) {
-  if (artifact.status !== "READY") throw new ForgeAgentError("CONFLICT", "Seul un artifact READY peut être restauré.");
-  if (!artifact.patch || artifact.patch.includes("\0")) throw new ForgeAgentError("INVALID_INPUT", "Patch artifact invalide.");
-  if (artifact.changedFiles.some((path) => !path || path.startsWith("/") || path.includes("\\") || path.split("/").includes("..") || sensitivePath.test(path))) throw new ForgeAgentError("INVALID_INPUT", "Patch artifact sensible ou hors repository refusé.");
+  if (artifact.status !== "READY") throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: seul un artifact READY peut être publié.");
+  if (!artifact.patch || artifact.patch.includes("\0")) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch artifact invalide.");
+  if (artifact.changedFiles.some((path) => !path || path.startsWith("/") || path.includes("\\") || path.split("/").includes("..") || sensitivePath.test(path))) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch sensible ou hors repository refusé.");
   for (const line of artifact.patch.split("\n")) {
     if (!/^(?:diff --git|--- |\+\+\+ )/.test(line) || /(?:---|\+\+\+) \/dev\/null$/.test(line)) continue;
-    if (/ (?:a|b)?\/\.\.\//.test(line) || / (?:a|b)?\/(?:\.env(?:[./]|$)|\.git(?:\/|$)|node_modules(?:\/|$)|credentials?(?:[./]|$)|secrets?(?:[./]|$))/i.test(line)) throw new ForgeAgentError("INVALID_INPUT", "Patch artifact sensible ou hors repository refusé.");
+    if (/ (?:a|b)?\/\.\.\//.test(line) || / (?:a|b)?\/(?:\.env(?:[./]|$)|\.git(?:\/|$)|node_modules(?:\/|$)|credentials?(?:[./]|$)|secrets?(?:[./]|$))/i.test(line)) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch sensible ou hors repository refusé.");
   }
 }
 export function normalizeForgeBranchName(value: unknown) {
-  if (typeof value !== "string") throw new ForgeAgentError("INVALID_INPUT", "Nom de branche invalide.");
+  if (typeof value !== "string") throw new ForgeAgentError("INVALID_INPUT", "INVALID_BRANCH: nom de branche invalide.");
   const branch = value.trim();
-  if (!/^forge\/[a-z0-9][a-z0-9._/-]{0,78}$/i.test(branch) || branch.includes("..") || branch.includes("//") || branch.endsWith("/") || branch.endsWith(".lock")) throw new ForgeAgentError("INVALID_INPUT", "La branche doit utiliser un nom Git sûr sous forge/.");
+  if (!/^forge\/[a-z0-9][a-z0-9._/-]{0,78}$/i.test(branch) || branch.includes("..") || branch.includes("//") || branch.endsWith("/") || branch.endsWith(".lock")) throw new ForgeAgentError("INVALID_INPUT", "INVALID_BRANCH: utilisez un nom Git sûr sous forge/.");
   return branch;
 }
 export function normalizeForgeCommitMessage(value: unknown) {
-  if (typeof value !== "string" || !value.trim() || value.trim().length > 200 || /[\r\n\0]/.test(value)) throw new ForgeAgentError("INVALID_INPUT", "Message de commit invalide.");
+  if (typeof value !== "string" || !value.trim() || value.trim().length > 200 || /[\r\n\0]/.test(value)) throw new ForgeAgentError("INVALID_INPUT", "COMMIT_FAILED: message de commit invalide.");
   return value.trim();
 }
-function requireConfirmation(value: unknown, action: string) { if (value !== true) throw new ForgeAgentError("CONFLICT", `Confirmation explicite requise pour ${action}.`); }
+function normalizePullRequestBody(value: unknown, fallback: string) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || value.length > 10_000 || value.includes("\0")) throw new ForgeAgentError("INVALID_INPUT", "PR_FAILED: description invalide.");
+  return value.trim();
+}
+function requireConfirmation(value: unknown, action: string) { if (value !== true) throw new ForgeAgentError("CONFLICT", `AUTH_REQUIRED: Confirmation explicite requise pour ${action}.`); }
 function succeeded(result: ForgeRuntimeCommandResult, label: string) {
-  if (result.timedOut || result.exitCode !== 0) throw new ForgeAgentError("CONFLICT", `${label} a échoué (exitCode=${result.exitCode ?? "null"}).`);
+  if (result.timedOut || result.exitCode !== 0) throw new ForgeAgentError("CONFLICT", `${label} (exitCode=${result.exitCode ?? "null"}).`);
   return result.stdout.trim();
 }
 function git(runtime: ForgeContinuityRuntimeAdapter, args: string[]) { return runtime.execute({ command: "git", args, cwd: ".", timeoutMs: 60_000, maxOutputBytes: 250_000 }); }
 function conflictFiles(output: string) { return [...new Set([...output.matchAll(/(?:error:\s+patch failed:\s+|patch does not apply\s+)([^:\r\n]+)/gi)].map((match) => match[1].trim()).filter(Boolean))].slice(0, 50); }
 function encodeBasic(username: string, password: string) {
-  if (!username || !password || /[\r\n\0]/.test(username + password)) throw new ForgeAgentError("INVALID_INPUT", "Credential GitHub invalide.");
+  if (!username || !password || /[\r\n\0]/.test(username + password)) throw new ForgeAgentError("INVALID_INPUT", "GITHUB_AUTH_REQUIRED: credential GitHub invalide.");
   return Buffer.from(`${username}:${password}`, "utf8").toString("base64");
 }
+function changedFiles(status: ForgeRuntimeGitStatus) { return [...new Set([...status.added, ...status.modified, ...status.deleted])].sort(); }
+function sameFiles(left: string[], right: string[]) { return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort()); }
 
 export function createForgeContinuityService(deps: ForgeContinuityDependencies) {
   async function owned(userId: string, conversationId: string, artifactId: string) {
-    if (!userId.trim()) throw new ForgeAgentError("UNAUTHENTICATED", "Authentification requise.");
+    if (!userId.trim()) throw new ForgeAgentError("UNAUTHENTICATED", "AUTH_REQUIRED: authentification requise.");
     const [workspace, runtime, artifact] = await Promise.all([deps.getWorkspace(userId, conversationId), deps.getRuntime(userId, conversationId), deps.getArtifact(userId, artifactId)]);
-    if (!workspace || !runtime || !artifact) throw new ForgeAgentError("NOT_FOUND", "Artifact ou runtime Forge introuvable.");
+    if (!workspace || !runtime || !artifact) throw new ForgeAgentError("NOT_FOUND", "OWNERSHIP_DENIED: artifact ou runtime Forge introuvable.");
     const run = await deps.getRun(userId, artifact.runId);
-    if (!run || run.conversationId !== conversationId || run.projectId !== workspace.projectId || artifact.repository !== workspace.repository) throw new ForgeAgentError("NOT_FOUND", "Artifact Forge non autorisé pour ce projet.");
-    if (runtime.status !== "READY") throw new ForgeAgentError("CONFLICT", "Un runtime READY est requis.");
+    if (!run || run.conversationId !== conversationId || run.projectId !== workspace.projectId || artifact.repository !== workspace.repository) throw new ForgeAgentError("NOT_FOUND", "OWNERSHIP_DENIED: artifact Forge non autorisé pour ce projet.");
+    if (runtime.status !== "READY") throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: un runtime READY est requis.");
     return { workspace, runtime, artifact, run, adapter: deps.runtime(userId, conversationId) };
   }
 
   async function restore(userId: string, conversationId: string, artifactId: string, allowBaseMismatch = false) {
     const target = await owned(userId, conversationId, artifactId);
-    if (target.artifact.status === "EMPTY") {
-      return deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORED", restoredAt: deps.now(), restoredRuntimeId: target.runtime.runtimeId, conflictFiles: [] });
-    }
+    if (target.artifact.status === "EMPTY") return deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORED", restoredAt: deps.now(), restoredRuntimeId: target.runtime.runtimeId, conflictFiles: [] });
     assertContinuityPatchSafe(target.artifact);
     await deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORING", conflictFiles: [] });
-    const initialStatus = await target.adapter.getGitStatus();
-    const existingChanges = [...initialStatus.added, ...initialStatus.modified, ...initialStatus.deleted];
-    if (existingChanges.length > 0) return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: [...new Set(existingChanges)].sort() });
+    const existingChanges = changedFiles(await target.adapter.getGitStatus());
+    if (existingChanges.length > 0) return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: existingChanges });
     const temporaryPath = `.noline/restore-${target.artifact.artifactId}.patch`;
     try {
       await target.adapter.writeFile(temporaryPath, target.artifact.patch);
-      const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du HEAD");
+      const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du HEAD échouée");
       const check = await git(target.adapter, ["apply", "--check", "--whitespace=nowarn", temporaryPath]);
       if (check.timedOut || check.exitCode !== 0) return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: conflictFiles(`${check.stdout}\n${check.stderr}`) });
       if (head !== target.artifact.baseCommitSha && !allowBaseMismatch) return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: [] });
-      succeeded(await git(target.adapter, ["apply", "--whitespace=nowarn", temporaryPath]), "Restauration du patch");
+      succeeded(await git(target.adapter, ["apply", "--whitespace=nowarn", temporaryPath]), "Restauration du patch échouée");
       const [status, diff] = await Promise.all([target.adapter.getGitStatus(), target.adapter.getGitDiff()]);
       if (diff.truncated) throw new ForgeAgentError("LIMIT", "Le diff restauré dépasse la limite de vérification.");
-      const expected = [...target.artifact.changedFiles].sort();
-      const actual = [...new Set([...status.added, ...status.modified, ...status.deleted])].sort();
-      if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new ForgeAgentError("CONFLICT", "Le working tree restauré ne correspond pas à l’artifact.");
+      if (!sameFiles(target.artifact.changedFiles, changedFiles(status))) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: le working tree restauré ne correspond pas à l’artifact.");
       return deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORED", restoredAt: deps.now(), restoredRuntimeId: target.runtime.runtimeId, conflictFiles: [] });
     } catch (error) {
       if (error instanceof ForgeAgentError) await deps.updateArtifact(userId, artifactId, { restoreStatus: error.code === "CONFLICT" ? "CONFLICT" : "FAILED" });
@@ -110,46 +103,71 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
 
   async function createBranch(userId: string, conversationId: string, artifactId: string, branchInput: unknown) {
     const branch = normalizeForgeBranchName(branchInput), target = await owned(userId, conversationId, artifactId);
-    const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du HEAD");
-    if (head !== target.artifact.baseCommitSha) throw new ForgeAgentError("CONFLICT", "La branche doit être créée depuis le SHA de base attendu.");
+    if (target.artifact.publicationStatus !== "LOCAL") {
+      if (target.artifact.branchName === branch) return target.artifact;
+      throw new ForgeAgentError("CONFLICT", "ALREADY_PUBLISHED: une branche de publication existe déjà.");
+    }
+    if (target.artifact.restoreStatus !== "RESTORED") throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez l’artifact avant de créer la branche.");
+    const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du HEAD échouée");
+    if (head !== target.artifact.baseCommitSha) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: la branche doit partir du SHA attendu.");
     const exists = await git(target.adapter, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-    if (exists.exitCode === 0) throw new ForgeAgentError("CONFLICT", "Cette branche existe déjà.");
-    if (exists.exitCode !== 1) throw new ForgeAgentError("CONFLICT", "Impossible de vérifier la branche.");
-    succeeded(await git(target.adapter, ["switch", "-c", branch, target.artifact.baseCommitSha]), "Création de la branche");
+    if (exists.exitCode === 0) throw new ForgeAgentError("CONFLICT", "BRANCH_EXISTS: cette branche existe déjà.");
+    if (exists.exitCode !== 1) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED: impossible de vérifier la branche.");
+    succeeded(await git(target.adapter, ["switch", "-c", branch, target.artifact.baseCommitSha]), "COMMIT_FAILED: création de branche échouée");
     return deps.updateArtifact(userId, artifactId, { publicationStatus: "BRANCHED", branchName: branch });
   }
 
   async function commit(userId: string, conversationId: string, artifactId: string, messageInput: unknown, confirmed: unknown) {
     requireConfirmation(confirmed, "créer le commit");
     const message = normalizeForgeCommitMessage(messageInput), target = await owned(userId, conversationId, artifactId);
-    if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.publicationStatus !== "BRANCHED" || !target.artifact.branchName) throw new ForgeAgentError("CONFLICT", "Restaurez l’artifact et créez une branche avant le commit.");
+    if (["COMMITTED", "PUSHED", "PR_CREATED"].includes(target.artifact.publicationStatus) && target.artifact.commitSha) return target.artifact;
+    if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.publicationStatus !== "BRANCHED" || !target.artifact.branchName) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez l’artifact et créez une branche avant le commit.");
     assertContinuityPatchSafe(target.artifact);
-    const branch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "Lecture de la branche");
-    if (branch !== target.artifact.branchName || /^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "Le commit doit cibler la branche Forge confirmée.");
-    succeeded(await git(target.adapter, ["add", "--", ...target.artifact.changedFiles]), "Préparation du commit");
-    succeeded(await git(target.adapter, ["commit", "-m", message]), "Création du commit");
-    const sha = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du commit");
+    const branch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "COMMIT_FAILED: lecture de branche échouée");
+    if (branch !== target.artifact.branchName || /^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: le commit doit cibler la branche Forge confirmée.");
+    const status = await target.adapter.getGitStatus();
+    if (!sameFiles(target.artifact.changedFiles, changedFiles(status))) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: les fichiers du working tree diffèrent de l’artifact.");
+    succeeded(await git(target.adapter, ["add", "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: préparation du commit échouée");
+    const staged = await git(target.adapter, ["diff", "--cached", "--quiet"]);
+    if (staged.exitCode !== 1 || staged.timedOut) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED: aucun changement validé à committer.");
+    succeeded(await git(target.adapter, ["commit", "-m", message]), "COMMIT_FAILED: création du commit échouée");
+    const sha = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "COMMIT_FAILED: lecture du commit échouée");
     return deps.updateArtifact(userId, artifactId, { publicationStatus: "COMMITTED", commitSha: sha });
   }
 
   async function push(userId: string, conversationId: string, artifactId: string, confirmed: unknown) {
     requireConfirmation(confirmed, "push vers GitHub");
     const target = await owned(userId, conversationId, artifactId);
-    if (target.artifact.publicationStatus !== "COMMITTED" || !target.artifact.branchName || !deps.getPushCredential) throw new ForgeAgentError("CONFLICT", "Un commit local sur une branche Forge est requis.");
+    if (["PUSHED", "PR_CREATED"].includes(target.artifact.publicationStatus) && target.artifact.remoteBranch) return target.artifact;
+    if (target.artifact.publicationStatus !== "COMMITTED" || !target.artifact.branchName || !target.artifact.commitSha) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: un commit local sur une branche Forge est requis.");
+    if (!deps.preparePush) throw new ForgeAgentError("CONFLICT", "GITHUB_AUTH_REQUIRED: publication GitHub indisponible.");
     const branch = normalizeForgeBranchName(target.artifact.branchName);
-    if (/^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "Le push direct vers main/master est interdit.");
-    const credential = await deps.getPushCredential(userId, target.artifact.repository);
+    if (/^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "PUSH_REJECTED: le push direct vers main/master est interdit.");
+    const currentBranch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "PUSH_REJECTED: lecture de branche échouée");
+    const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "PUSH_REJECTED: lecture du commit échouée");
+    if (currentBranch !== branch || head !== target.artifact.commitSha) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: branche ou commit local inattendu.");
+    let credential: { username: string; password: string; remoteSha: string | null };
+    try { credential = await deps.preparePush(userId, target.artifact.repository, branch); }
+    catch { throw new ForgeAgentError("CONFLICT", "GITHUB_AUTH_REQUIRED: autorisation GitHub d’écriture indisponible."); }
+    if (credential.remoteSha === target.artifact.commitSha) return deps.updateArtifact(userId, artifactId, { publicationStatus: "PUSHED", remoteBranch: branch, publishedAt: target.artifact.publishedAt || deps.now() });
+    if (credential.remoteSha && credential.remoteSha !== target.artifact.baseCommitSha) throw new ForgeAgentError("CONFLICT", "REMOTE_CHANGED: la branche distante a divergé; aucun push effectué.");
     const header = `AUTHORIZATION: basic ${encodeBasic(credential.username, credential.password)}`;
-    succeeded(await git(target.adapter, ["-c", "http.https://github.com/.extraheader=" + header, "push", "--set-upstream", "origin", branch]), "Push GitHub");
-    return deps.updateArtifact(userId, artifactId, { publicationStatus: "PUSHED" });
+    const result = await git(target.adapter, ["-c", `http.https://github.com/.extraheader=${header}`, "push", "origin", `${target.artifact.commitSha}:refs/heads/${branch}`]);
+    if (result.timedOut || result.exitCode !== 0) throw new ForgeAgentError("CONFLICT", "PUSH_REJECTED: GitHub a refusé le push non forcé.");
+    return deps.updateArtifact(userId, artifactId, { publicationStatus: "PUSHED", remoteBranch: branch, publishedAt: deps.now() });
   }
 
-  async function createPullRequest(userId: string, conversationId: string, artifactId: string, titleInput: unknown, confirmed: unknown) {
+  async function createPullRequest(userId: string, conversationId: string, artifactId: string, titleInput: unknown, bodyInput: unknown, confirmed: unknown) {
     requireConfirmation(confirmed, "créer la Pull Request");
     const title = normalizeForgeCommitMessage(titleInput), target = await owned(userId, conversationId, artifactId);
-    if (target.artifact.publicationStatus !== "PUSHED" || !target.artifact.branchName || !deps.createPullRequest) throw new ForgeAgentError("CONFLICT", "Une branche Forge poussée est requise.");
-    const result = await deps.createPullRequest(userId, { repository: target.artifact.repository, head: target.artifact.branchName, base: target.artifact.sourceBranch, title, body: `Forge AgentRun ${target.artifact.runId}\n\n${target.artifact.changedFiles.length} fichier(s), +${target.artifact.additions}/-${target.artifact.deletions}.\nValidations enregistrées dans la conversation Forge.` });
-    return deps.updateArtifact(userId, artifactId, { publicationStatus: "PR_CREATED", pullRequestUrl: result.url });
+    if (target.artifact.publicationStatus === "PR_CREATED" && target.artifact.pullRequestUrl && target.artifact.pullRequestNumber) return target.artifact;
+    if (target.artifact.publicationStatus !== "PUSHED" || !target.artifact.remoteBranch || !deps.createPullRequest) throw new ForgeAgentError("CONFLICT", "PR_FAILED: une branche Forge poussée est requise.");
+    const fallback = `Forge AgentRun ${target.artifact.runId}\n\n${target.artifact.changedFiles.length} fichier(s), +${target.artifact.additions}/-${target.artifact.deletions}.\n\nFichiers :\n${target.artifact.changedFiles.map((path) => `- ${path}`).join("\n")}\n\nValidations enregistrées dans la conversation Forge.`;
+    const body = normalizePullRequestBody(bodyInput, fallback);
+    let result: { number: number; url: string; createdAt: string };
+    try { result = await deps.createPullRequest(userId, { repository: target.artifact.repository, head: target.artifact.remoteBranch, base: target.artifact.sourceBranch, title, body }); }
+    catch { throw new ForgeAgentError("CONFLICT", "PR_FAILED: GitHub a refusé la création de la Pull Request."); }
+    return deps.updateArtifact(userId, artifactId, { publicationStatus: "PR_CREATED", pullRequestUrl: result.url, pullRequestNumber: result.number, pullRequestTarget: target.artifact.sourceBranch, pullRequestCreatedAt: result.createdAt });
   }
 
   return { restore, createBranch, commit, push, createPullRequest };
