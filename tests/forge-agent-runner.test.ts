@@ -332,6 +332,33 @@ test("appel shell Git invalide reçoit une erreur structurée et ne boucle pas",
   assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
 });
 
+test("recovery Git mutatif invalide redirige vers artifact puis Publication V1.5", async () => {
+  const invalidGit = { type: "TOOL_CALL", summary: "Créer la branche", tool: "run_command", input: { command: "git", args: ["switch", "-c", "forge/v15-live-publication-test"], cwd: "." } };
+  const target = harness([
+    { type: "PLAN", summary: "Préparer", plan: ["Créer le fichier", "Vérifier le diff", "Publier via le panneau contrôlé"] },
+    invalidGit,
+    (context: Record<string, unknown>) => { const history = JSON.stringify(context); assert.match(history, /CONTROLLED_GIT_WORKFLOW/); assert.match(history, /write_file.*git_status.*git_diff.*FINAL/); assert.match(history, /panneau Publication V1\.5/); return { type: "TOOL_CALL", summary: "Créer le fichier demandé", tool: "write_file", input: { path: "forge-v15-live-test.txt", content: "NØLINE Forge V1.5 live publication test" } }; },
+    { type: "TOOL_CALL", summary: "Vérifier Git status", tool: "git_status", input: {} },
+    { type: "TOOL_CALL", summary: "Vérifier Git diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Artifact prêt", report: "Le fichier et le diff sont prêts; branche et commit restent des actions utilisateur du panneau Publication V1.5." },
+  ]);
+  const result = await target.runner.run("user-a", "conversation-a", "Crée le fichier demandé puis prépare une branche Forge contrôlée");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands.length, 0);
+  assert.deepEqual(target.writes, ["forge-v15-live-test.txt"]);
+  assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
+  assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.equal(target.artifacts.length, 1);
+});
+
+test("anti-loop bloque toujours trois appels Git invalides strictement identiques", async () => {
+  const invalidGit = { type: "TOOL_CALL", summary: "Créer la branche", tool: "run_command", input: { command: "git", args: ["switch", "-c", "forge/repeat"], cwd: "." } };
+  const target = harness([invalidGit, invalidGit, invalidGit]);
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Crée une branche Forge"), /répète un appel d’outil invalide/);
+  assert.equal(target.run()?.status, "FAILED");
+  assert.equal(target.commands.length, 0);
+  assert.equal(target.steps.filter((step) => step.tool === "run_command").length, 2);
+});
 test("boucle agentique planifie, corrige une validation en échec puis termine", async () => {
   const target = harness([
     { type: "PLAN", summary: "Plan", plan: ["Inspecter", "Modifier", "Tester"] },

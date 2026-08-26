@@ -164,7 +164,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             continue;
           }
           if (previousFailures === 1) {
-            const duplicateMessage = "Appel identique déjà refusé. Corrige le schéma de l’outil; pour Git utilise git_status puis git_diff, sans shell composé.";
+            const duplicateMessage = invalidRunCommandRecovery(safeInput, "Appel identique déjà refusé.");
             steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "TOOL_CALL", summary: sanitizeAgentText(decision.summary, 1000), tool: decision.tool, input: safeInput, resultSummary: duplicateMessage, status: "FAILED", startedAt: now, completedAt: now }));
             failedCalls.set(signature, 2);
             continue;
@@ -224,7 +224,7 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
             const actionable = missingOptionalFile
               ? sanitizeAgentText(`OPTIONAL FILE ABSENT: ${reason} Cette absence est une information d'inspection, pas un blocker runtime. N'essaie pas de relire ce chemin; poursuis avec la prochaine obligation.`, 1400)
               : decision.tool === "run_command" && code === "INVALID_INPUT"
-                ? sanitizeAgentText(`TOOL ERROR [INVALID_INPUT] tool=run_command input=${JSON.stringify(safeInput)}: ${reason} RUN_COMMAND_CONTRACT: command doit être un exécutable simple; args un tableau séparé; cwd un chemin relatif; aucun &&, pipe ou redirection. Corrige l'input avant le prochain TOOL_CALL.`, 2200)
+                ? invalidRunCommandRecovery(safeInput, reason)
                 : sanitizeAgentText(`TOOL ERROR [${code}] tool=${decision.tool} input=${JSON.stringify(safeInput)}: ${reason} Prochaine action: corrige cet input ou utilise un autre outil autorisé; git_status/git_diff sont des outils dédiés.`, 1800);
             if (!missingOptionalFile && !isBlockingToolError(error)) lastRecoverableFailure = actionable;
             const failed = await deps.updateStep(userId, executing.stepId, { resultSummary: actionable, status: "FAILED", completedAt: deps.now() });
@@ -480,6 +480,11 @@ function availablePackageValidations(packageScripts: Map<string, string> | null)
     available.add(script);
   }
   return available;
+}
+function invalidRunCommandRecovery(input: Record<string, unknown>, reason: string) {
+  const command = String(input.command || "").trim();
+  if (/^git(?:\s|$)/i.test(command)) return sanitizeAgentText(`TOOL ERROR [INVALID_INPUT] tool=run_command input=${JSON.stringify(input)}: ${reason} CONTROLLED_GIT_WORKFLOW: run_command n'autorise aucune commande Git. Les mutations branch/switch/stage/commit sont des actions utilisateur du panneau Publication V1.5 après création de l'artifact; elles ne sont pas des TOOL_CALL du modèle. Pour continuer cette mission, réalise les changements demandés avec write_file/delete_file, exécute les validations disponibles, puis utilise git_status et git_diff pour les preuves avant FINAL. N'essaie plus run_command avec git. Si l'objectif demande uniquement une publication Git sans changement de fichier, retourne FAIL avec CONTROLLED_GIT_ACTION_REQUIRED au lieu de répéter l'appel.`, 3000);
+  return sanitizeAgentText(`TOOL ERROR [INVALID_INPUT] tool=run_command input=${JSON.stringify(input)}: ${reason} RUN_COMMAND_CONTRACT: command doit être un exécutable simple; args un tableau séparé; cwd un chemin relatif; aucun &&, pipe ou redirection. Corrige l'input avant le prochain TOOL_CALL.`, 2200);
 }
 function commandFailureRecovery(input: Record<string, unknown>, result: ForgeRuntimeCommandResult, filesystemRevision: number, mutationRevision: number, repositoryPackageObserved: boolean) {
   const safe = safeToolInput("run_command", input);

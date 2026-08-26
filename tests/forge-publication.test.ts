@@ -30,6 +30,7 @@ function harness(options: { artifact?: Record<string, unknown>; commands?: Retur
 test("A/B branche autorisée depuis le SHA attendu et noms invalides refusés", async () => {
   const target = harness({ artifact: { publicationStatus: "LOCAL", branchName: null }, commands: [result(0, "a".repeat(40)), result(1), result(0)] });
   assert.equal((await target.service.createBranch("user-p", "conversation-p", "artifact-p", "forge/session-safe")).publicationStatus, "BRANCHED");
+  assert.deepEqual(target.commands.map((item) => item.args), [["rev-parse", "HEAD"], ["show-ref", "--verify", "--quiet", "refs/heads/forge/session-safe"], ["switch", "-c", "forge/session-safe", "a".repeat(40)]]);
   for (const name of ["main", "forge/../main", "forge/a b", "forge/x.lock", "forge/x;push"]) assert.throws(() => normalizeForgeBranchName(name), /INVALID_BRANCH/);
 });
 
