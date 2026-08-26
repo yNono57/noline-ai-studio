@@ -98,6 +98,9 @@ export function getForgeRuntimeGitDiff(conversationId: string, limit?: number) {
   return request<{ diff: ForgeRuntimeGitDiff }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/workspace/runtime/git/diff${query}`);
 }
 
+export function listForgeArtifacts(conversationId: string) { return request<{ artifacts: ForgeRunArtifact[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/artifacts`); }
+export function runForgeArtifactAction(conversationId: string, artifactId: string, input: Record<string, unknown>) { return request<{ artifact: ForgeRunArtifact }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(artifactId)}`, { method: "POST", body: JSON.stringify(input) }); }
+
 export type ForgeAgentRunPayload = { run: ForgeAgentRunView; steps: ForgeAgentStep[]; artifact: ForgeRunArtifact | null };
 export function getLatestForgeAgentRun(conversationId: string) { return request<{ agentRun: ForgeAgentRunPayload | null; agentRuns: ForgeAgentRunPayload[] }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`); }
 export function startForgeAgentRun(conversationId: string, objective: string, submissionId: string) { return request<{ agentRun: ForgeAgentRunPayload; conversation: ForgeConversation; user_message: ForgeMessage; assistant_message: ForgeMessage | null }>(`/api/forge/conversations/${encodeURIComponent(conversationId)}/agent-runs`, { method: "POST", body: JSON.stringify({ objective, submission_id: submissionId }) }); }

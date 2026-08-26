@@ -1,0 +1,66 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { ArchiveRestore, Download, GitBranch, GitCommit, Loader2 } from "lucide-react";
+import type { ForgeRunArtifact } from "@/lib/forge/agent-foundation";
+import { listForgeArtifacts, runForgeArtifactAction } from "@/lib/forge/forge-client";
+
+export function ForgeArtifactHistory({ conversationId, runtimeReady }: { conversationId: string; runtimeReady: boolean }) {
+  const [artifacts, setArtifacts] = useState<ForgeRunArtifact[]>([]);
+  const [working, setWorking] = useState("");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setArtifacts([]); setMessage("");
+    if (!conversationId) return () => { active = false; };
+    listForgeArtifacts(conversationId).then(({ artifacts }) => { if (active) setArtifacts(artifacts); }).catch((error) => { if (active) setMessage(error instanceof Error ? error.message : "Artifacts indisponibles."); });
+    return () => { active = false; };
+  }, [conversationId]);
+
+  function replace(artifact: ForgeRunArtifact) { setArtifacts((current) => current.map((item) => item.artifactId === artifact.artifactId ? artifact : item)); }
+  async function action(artifact: ForgeRunArtifact, input: Record<string, unknown>) {
+    setWorking(artifact.artifactId); setMessage("");
+    try { const result = await runForgeArtifactAction(conversationId, artifact.artifactId, input); replace(result.artifact); return result.artifact; }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Action Forge impossible."); return null; }
+    finally { setWorking(""); }
+  }
+  function download(artifact: ForgeRunArtifact) {
+    const url = URL.createObjectURL(new Blob([artifact.patch], { type: "text/x-diff;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `forge-${artifact.runId}.patch`; link.click(); URL.revokeObjectURL(url);
+  }
+  async function restore(artifact: ForgeRunArtifact) {
+    const result = await action(artifact, { action: "restore" });
+    if (result?.restoreStatus === "CONFLICT" && result.conflictFiles.length === 0 && window.confirm("La base Git diffère, mais le patch est applicable. Restaurer sur cette base après vérification ?")) await action(result, { action: "restore", allow_base_mismatch: true });
+  }
+  async function branch(artifact: ForgeRunArtifact) {
+    const proposed = `forge/run-${artifact.runId.slice(0, 8)}`;
+    const name = window.prompt("Nom de la branche Forge", proposed);
+    if (name) await action(artifact, { action: "branch", branch: name });
+  }
+  async function commit(artifact: ForgeRunArtifact) {
+    const commitMessage = window.prompt("Message du commit", `Forge: restore run ${artifact.runId.slice(0, 8)}`);
+    if (commitMessage && window.confirm(`Créer ce commit avec ${artifact.changedFiles.length} fichier(s), +${artifact.additions}/-${artifact.deletions} ?`)) await action(artifact, { action: "commit", message: commitMessage, confirmed: true });
+  }
+  if (!artifacts.length && !message) return null;
+  return <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+    <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-black text-white"><ArchiveRestore className="h-4 w-4 text-noline-orange" />Travail précédent disponible<span className="ml-auto text-[10px] text-noline-muted">{artifacts.length}</span></summary>
+    {message ? <p role="status" className="mt-2 text-xs text-amber-200">{message}</p> : null}
+    <div className="mt-3 space-y-2">{artifacts.map((artifact) => <article key={artifact.artifactId} className="rounded-md border border-white/10 bg-black/20 p-2 text-[10px] text-noline-muted">
+      <div className="flex items-center gap-2"><strong className="text-white">{new Date(artifact.createdAt).toLocaleString("fr-FR")}</strong><span>{artifact.changedFiles.length} fichier(s)</span><span className="text-green-300">+{artifact.additions}</span><span className="text-red-300">-{artifact.deletions}</span></div>
+      <p className="mt-1 font-mono">{artifact.runId.slice(0, 8)} · {artifact.sourceBranch} · {artifact.baseCommitSha.slice(0, 12)}</p>
+      <p className="mt-1 font-black text-noline-orange">{artifact.restoreStatus} · {artifact.publicationStatus}</p>
+      {artifact.conflictFiles.length ? <p className="mt-1 text-red-200">Conflit de restauration : {artifact.conflictFiles.join(", ")}</p> : null}
+      <div className="mt-2 flex flex-wrap gap-1">
+        <details className="rounded border border-white/10 px-2 py-1"><summary className="cursor-pointer text-white">Voir</summary><pre className="mt-2 max-h-56 max-w-full overflow-auto whitespace-pre-wrap font-mono">{artifact.patch || "Aucun changement Git."}</pre></details>
+        <button type="button" onClick={() => download(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><Download className="h-3 w-3" />Télécharger</button>
+        {artifact.status === "READY" && artifact.restoreStatus !== "RESTORED" ? <button type="button" disabled={!runtimeReady || working === artifact.artifactId} onClick={() => void restore(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-noline-orange/40 px-2 text-noline-orange disabled:opacity-40">{working === artifact.artifactId ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}Restaurer</button> : null}
+        {artifact.restoreStatus === "RESTORED" && artifact.publicationStatus === "LOCAL" ? <button type="button" onClick={() => void branch(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><GitBranch className="h-3 w-3" />Créer une branche</button> : null}
+        {artifact.publicationStatus === "BRANCHED" ? <button type="button" onClick={() => void commit(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><GitCommit className="h-3 w-3" />Créer un commit</button> : null}
+        {artifact.publicationStatus === "COMMITTED" ? <span title="Intégration GitHub serveur dédiée requise" className="flex min-h-8 items-center rounded border border-white/10 px-2 text-noline-muted">Push vers GitHub · à venir</span> : null}
+        {artifact.publicationStatus === "PUSHED" ? <span title="Intégration GitHub serveur dédiée requise" className="flex min-h-8 items-center rounded border border-white/10 px-2 text-noline-muted">Créer une Pull Request · à venir</span> : null}
+        {artifact.pullRequestUrl ? <a href={artifact.pullRequestUrl} target="_blank" rel="noreferrer" className="flex min-h-8 items-center rounded border border-white/10 px-2 text-noline-orange">Ouvrir la PR</a> : null}
+      </div>
+    </article>)}</div>
+  </details>;
+}
