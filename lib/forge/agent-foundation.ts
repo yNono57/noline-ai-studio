@@ -193,6 +193,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               if (npmValidationNotApplicable) {
                 packageScripts = new Map();
                 validationRecovery = null;
+                lastPrematureProgressKey = null;
+                prematureWithoutProgress = 0;
                 if (commandKey) failedValidationCommands.delete(commandKey);
               } else {
                 if (commandKey) failedValidationCommands.set(commandKey, { mutationVersion, resultSummary: modelSummary });
@@ -203,6 +205,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               successfulToolCalls += 1;
               stalledDecisions = 0;
               prematureTerminations = 0;
+              lastPrematureProgressKey = null;
+              prematureWithoutProgress = 0;
               if (commandKey) failedValidationCommands.delete(commandKey);
               if (decision.tool === "write_file" || decision.tool === "delete_file") { mutationOccurred = true; mutationVersion += 1; inspectionRevision += 1; lastRecoverableFailure = null; gitStatusSucceeded = false; gitDiffSucceeded = false; observedGitDiff = null; completionArtifact = null; successfulPackageValidations.clear(); if (validationRecovery) validationRecovery.correctionMutationVersion = mutationVersion; if (requirements.validation) { validationAttempted = false; validationFailed = false; } }
               if (decision.tool === "run_command") { lastRecoverableFailure = null; if (validation && requestedNpmScript && availablePackageValidations(packageScripts).has(requestedNpmScript)) successfulPackageValidations.add(requestedNpmScript); if (validation && validationRecovery && (mutationVersion > validationRecovery.failureMutationVersion || validationRecovery.failureKind === "COMMAND_CWD")) validationRecovery = null; }
@@ -253,13 +257,6 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           continue;
         }
         if (decision.type === "FINAL") {
-          if (!isGroundedAgentFinal(decision.report, successfulToolCalls) && !validationRecovery) {
-            prematureTerminations += 1;
-            const recovery = startupRecoveryMessage(prematureTerminations);
-            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
-            if (prematureTerminations >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse d’utiliser les outils après trois demandes de récupération.");
-            continue;
-          }
           const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed }, packageScripts, successfulPackageValidations);
           const validationRecoveryMissing = validationRecoveryRequirements(validationRecovery);
           if (missingRequirements.length || validationRecoveryMissing.length) {
@@ -282,6 +279,8 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
               const persisted = await deps.updateStep(userId, executing.stepId, { resultSummary: summarizeToolResult(mandatoryTool, result, false), status: "COMPLETED", completedAt: deps.now() });
               successfulToolCalls += 1;
               prematureTerminations = 0;
+              lastPrematureProgressKey = null;
+              prematureWithoutProgress = 0;
               if (mandatoryTool === "git_status") gitStatusSucceeded = true;
               else { gitDiffSucceeded = true; observedGitDiff = result as ForgeRuntimeGitDiff; }
               steps.push({ ...persisted, resultSummary: summarizeToolResult(mandatoryTool, result, true) });
@@ -301,21 +300,44 @@ export function createForgeAgentRunner(deps: ForgeAgentRunnerDependencies) {
           if (mutationOccurred && !completionArtifact) {
             if (!observedGitDiff) throw new ForgeAgentError("PERSISTENCE", "Artifact Forge impossible: aucun Git diff réel disponible.");
             completionArtifact = await deps.createArtifact(userId, createCompletionArtifactInput(run.runId, context.repository, context.baseCommitSha, context.branch, observedGitDiff));
+            lastPrematureProgressKey = null;
+            prematureWithoutProgress = 0;
+          }
+          if (!isGroundedAgentFinal(decision.report, successfulToolCalls) && !validationRecovery) {
+            prematureTerminations += 1;
+            const finalRequirement = ["produire un FINAL fondé sur les outils réellement exécutés"];
+            const progress = registerPrematureRecovery(null, finalRequirement, lastPrematureProgressKey, prematureWithoutProgress);
+            lastPrematureProgressKey = progress.key;
+            prematureWithoutProgress = progress.count;
+            const recovery = successfulToolCalls === 0
+              ? startupRecoveryMessage(prematureTerminations)
+              : completionRecoveryMessage(prematureTerminations, finalRequirement, { inspectionSatisfied, minimalRepositoryConfirmed }, undefined, lastRecoverableFailure, null);
+            steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Résultat final prématuré", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
+            if (prematureWithoutProgress >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge tente de terminer sans progresser dans la récupération requise.");
+            continue;
           }
           const report = sanitizeAgentText(decision.report, 20_000);
           await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FINAL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: report, status: "COMPLETED", startedAt: now, completedAt: now });
           return deps.updateRun(userId, run.runId, { status: "COMPLETED", finalReport: report, completedAt: deps.now(), lastActivityAt: deps.now() });
         }
-        const missingRequirements = getMissingCompletionRequirements(requirements, { mutationOccurred, validationAttempted, validationFailed }, packageScripts, successfulPackageValidations);
+        const missingActions = remainingCompletionActions(requirements, { mutationOccurred, validationAttempted, validationFailed, gitStatusSucceeded, gitDiffSucceeded }, packageScripts, successfulPackageValidations);
         const validationRecoveryMissing = validationRecoveryRequirements(validationRecovery);
-        if (successfulToolCalls === 0 || ((missingRequirements.length || validationRecoveryMissing.length) && blockingToolFailures === 0)) {
+        if (successfulToolCalls === 0 || ((missingActions.length || validationRecoveryMissing.length) && blockingToolFailures === 0)) {
           prematureTerminations += 1;
-          const progress = registerPrematureRecovery(validationRecovery, missingRequirements, lastPrematureProgressKey, prematureWithoutProgress);
+          const progress = registerPrematureRecovery(validationRecovery, missingActions, lastPrematureProgressKey, prematureWithoutProgress);
           lastPrematureProgressKey = progress.key;
           prematureWithoutProgress = progress.count;
-          const recovery = successfulToolCalls === 0 && !validationRecovery ? startupRecoveryMessage(prematureTerminations, decision.error, lastRecoverableFailure) : completionRecoveryMessage(prematureTerminations, [...new Set([...validationRecoveryMissing, ...missingRequirements])], { inspectionSatisfied, minimalRepositoryConfirmed }, decision.error, lastRecoverableFailure, validationRecovery);
+          const recovery = successfulToolCalls === 0 && !validationRecovery ? startupRecoveryMessage(prematureTerminations, decision.error, lastRecoverableFailure) : completionRecoveryMessage(prematureTerminations, [...new Set([...validationRecoveryMissing, ...missingActions])], { inspectionSatisfied, minimalRepositoryConfirmed }, decision.error, lastRecoverableFailure, validationRecovery);
           steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: successfulToolCalls === 0 && !validationRecovery ? "Démarrage agentique incomplet" : "Mission incomplète", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
           if (prematureWithoutProgress >= 3) throw new ForgeAgentError("MODEL", "Le modèle Forge refuse de progresser dans la récupération requise.");
+          continue;
+        }
+        if (mutationOccurred && !completionArtifact && observedGitDiff) {
+          completionArtifact = await deps.createArtifact(userId, createCompletionArtifactInput(run.runId, context.repository, context.baseCommitSha, context.branch, observedGitDiff));
+          lastPrematureProgressKey = null;
+          prematureWithoutProgress = 0;
+          const recovery = completionRecoveryMessage(1, ["produire un FINAL fondé sur les outils réellement exécutés"], { inspectionSatisfied, minimalRepositoryConfirmed }, decision.error, lastRecoverableFailure, null);
+          steps.push(await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: "Mission incomplète", tool: null, input: {}, resultSummary: recovery, status: "FAILED", startedAt: now, completedAt: now }));
           continue;
         }
         await deps.appendStep(userId, { runId: run.runId, stepNumber: number, type: "FAIL", summary: sanitizeAgentText(decision.summary, 1000), tool: null, input: {}, resultSummary: sanitizeAgentText(decision.error, 1000), status: "FAILED", startedAt: now, completedAt: now });
@@ -383,7 +405,7 @@ function isDecisionCompatible(decision: ForgeAgentDecision, constraint: ForgeAge
 function startupRecoveryMessage(attempt: number, modelError?: string, lastRecoverableFailure?: string | null) {
   const reason = modelError ? `La terminaison demandée a été refusée: ${sanitizeAgentText(modelError, 500)} ` : "";
   const toolFailure = lastRecoverableFailure ? `Dernier échec récupérable: ${sanitizeAgentText(lastRecoverableFailure, 900)} ` : "";
-  return sanitizeAgentText(`${reason}${toolFailure}RECOVERY ${attempt}/3: aucun outil n’a encore réussi. La prochaine décision doit être un TOOL_CALL valide. Outils disponibles: list_files, read_file, write_file, delete_file, run_command, git_status, git_diff. Commence normalement par list_files {"path":"."}, puis inspecte les fichiers nécessaires. run_command exige un exécutable simple et des args séparés; aucun shell composé.`, 1600);
+  return sanitizeAgentText(`${reason}${toolFailure}RECOVERY ${attempt}/3: NEXT_REQUIRED_ACTION: list_files. aucun outil n’a encore réussi. La prochaine décision doit être un TOOL_CALL valide. Outils disponibles: list_files, read_file, write_file, delete_file, run_command, git_status, git_diff. Commence normalement par list_files {"path":"."}, puis inspecte les fichiers nécessaires. run_command exige un exécutable simple et des args séparés; aucun shell composé.`, 1600);
 }
 function getMissingCompletionRequirements(requirements: ForgeMissionRequirements, state: { mutationOccurred: boolean; validationAttempted: boolean; validationFailed: boolean }, packageScripts: Map<string, string> | null = null, successfulPackageValidations: Set<string> = new Set()) {
   const missing: string[] = [];
@@ -407,7 +429,23 @@ function completionRecoveryMessage(attempt: number, missing: string[], inspectio
     ? "Repository minimal confirmé. L'absence de fichiers source n'est pas un blocker. L'obligation d'inspection est satisfaite. "
     : inspection.inspectionSatisfied ? "Inspection du repository déjà effectuée. " : "";
   const phase = validationRecovery ? validationRecoveryInstruction(validationRecovery) : "";
-  return sanitizeAgentText(`${reason}${toolFailure}${repositoryState}RECOVERY: terminaison refusée. Mission incomplète. Obligations restantes:\n- ${missing.join("\n- ")}\n${phase || "Poursuis avec le TOOL_CALL de la prochaine obligation; n'effectue pas une nouvelle inspection identique."} Tentative globale=${attempt}.`, 4000);
+  return sanitizeAgentText(`${reason}${toolFailure}${repositoryState}RECOVERY: terminaison refusée. Mission incomplète. NEXT_REQUIRED_ACTION: ${nextRequiredAction(missing, validationRecovery ?? null)}. Obligations restantes:\n- ${missing.join("\n- ")}\n${phase || "Poursuis avec le TOOL_CALL de la prochaine obligation; n'effectue pas une nouvelle inspection identique."} Tentative globale=${attempt}.`, 4000);
+}
+function nextRequiredAction(missing: string[], validationRecovery: ForgeValidationRecovery | null) {
+  if (validationRecovery) {
+    const phase = currentAgentPhase(validationRecovery);
+    if (phase === "DIAGNOSTIC") return "read_file";
+    if (phase === "CORRECTION_REQUIRED") return "write_file_or_delete_file";
+    return "run_command_validation";
+  }
+  const first = missing[0] || "";
+  if (first.includes("git_status")) return "git_status";
+  if (first.includes("git_diff")) return "git_diff";
+  if (first.includes("artifact")) return "persist_artifact";
+  if (first.includes("FINAL")) return "final";
+  if (first.includes("mutation") || first.includes("créer ou modifier")) return "write_file_or_delete_file";
+  if (first.includes("validation") || first.includes("npm run")) return "run_command_validation";
+  return "next_completion_gate";
 }
 function isMissingRepositoryPackageManifest(result: ForgeRuntimeCommandResult) {
   const output = `${result.stdout || ""}

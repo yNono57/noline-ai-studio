@@ -562,9 +562,10 @@ new file mode 100644
     (context: Record<string, unknown>, constraint?: Record<string, unknown>) => {
       assert.equal(constraint?.phase, "NORMAL");
       assert.match(JSON.stringify(context), /VALIDATION_NOT_APPLICABLE/);
-      return { type: "TOOL_CALL", summary: "Vérifier Git status", tool: "git_status", input: {} };
+      return { type: "FINAL", summary: "Final prématuré avant Git", report: "Je vais terminer la mission." };
     },
-    { type: "TOOL_CALL", summary: "Vérifier Git diff", tool: "git_diff", input: {} },
+    { type: "FINAL", summary: "Final prématuré après status", report: "Je vais terminer la mission." },
+    { type: "FINAL", summary: "Final prématuré après diff", report: "Je vais terminer la mission." },
     { type: "FINAL", summary: "Mission terminée", report: "Le fichier demandé existe avec le contenu exact; validation npm non applicable; Git status et Git diff réels vérifiés." },
   ], false, {
     entries: [{ path: "README.md", type: "file", size: 48 }],
@@ -585,9 +586,31 @@ new file mode 100644
   assert.equal(target.constraints.some((constraint) => constraint?.phase === "CORRECTION_REQUIRED"), false);
   assert.equal(target.steps.find((step) => step.tool === "git_status")?.status, "COMPLETED");
   assert.equal(target.steps.find((step) => step.tool === "git_diff")?.status, "COMPLETED");
+  assert.equal(target.steps.filter((step) => step.type === "FINAL" && step.status === "COMPLETED").length, 1);
+  assert.match(String(target.steps.find((step) => step.summary === "Résultat final prématuré")?.resultSummary), /NEXT_REQUIRED_ACTION: final/);
+  assert.deepEqual(target.steps.filter((step) => step.tool === "git_status" || step.tool === "git_diff").map((step) => step.tool), ["git_status", "git_diff"]);
   assert.equal(target.artifacts.length, 1);
   assert.equal(target.artifacts[0]?.patch, realPatch);
   assert.ok(target.events.indexOf("ARTIFACT") < target.events.lastIndexOf("FINAL"));
+});
+
+test("NEXT_REQUIRED_ACTION guide FAIL de git_status vers git_diff puis artifact et FINAL", async () => {
+  const incomplete = { type: "FAIL", summary: "Mission incomplète", error: "Je tente de terminer trop tôt." };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Créer résultat", tool: "write_file", input: { path: "result.txt", content: "ready" } },
+    incomplete,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /NEXT_REQUIRED_ACTION: git_status/); return { type: "TOOL_CALL", summary: "Status requis", tool: "git_status", input: {} }; },
+    incomplete,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /NEXT_REQUIRED_ACTION: git_diff/); return { type: "TOOL_CALL", summary: "Diff requis", tool: "git_diff", input: {} }; },
+    incomplete,
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /NEXT_REQUIRED_ACTION: final/); return { type: "FINAL", summary: "Mission terminée", report: "result.txt a été créé; Git status et Git diff réels ont été vérifiés et artifact sauvegardé." }; },
+  ]);
+  const result = await target.runner.run("user-a", "conversation-a", "Crée result.txt contenant ready puis vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.deepEqual(target.steps.filter((step) => step.tool === "git_status" || step.tool === "git_diff").map((step) => step.tool), ["git_status", "git_diff"]);
+  assert.equal(target.artifacts.length, 1);
+  assert.ok(target.events.indexOf("ARTIFACT") < target.events.lastIndexOf("FINAL"));
+  assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 3);
 });
 
 test("validation réellement disponible en échec reste bloquée en correction et interdit COMPLETED", async () => {
