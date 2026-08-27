@@ -107,7 +107,7 @@ test("artifact EMPTY se restaure sans commande Git", async () => {
 });
 
 test("création de branche valide reste locale et refuse branche existante", async () => {
-  const target = harness({ artifact: { restoreStatus: "RESTORED" }, commands: [result(0, "a".repeat(40)), result(1), result(0)] });
+  const target = harness({ artifact: { restoreStatus: "RESTORED", restoredRuntimeId: "runtime-new" }, commands: [result(0, "a".repeat(40)), result(1), result(0)] });
   const branched = await target.service.createBranch("user-a", "conversation-a", "artifact-a", "forge/session-safe");
   assert.equal(branched.publicationStatus, "BRANCHED");
   assert.equal(target.commands.some((item) => (item.args as string[]).includes("push")), false);

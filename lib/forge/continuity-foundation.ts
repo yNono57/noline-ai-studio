@@ -1,5 +1,6 @@
 import type { ForgeRuntimeCommandResult, ForgeRuntimeGitDiff, ForgeRuntimeGitStatus } from "./runtime-foundation";
 import { ForgeAgentError, type ForgeAgentRun, type ForgeRunArtifact } from "./agent-foundation";
+import { getForgeArtifactPublicationBlocker } from "./artifact-publication";
 
 export type ForgeArtifactRestoreStatus = "AVAILABLE" | "RESTORING" | "RESTORED" | "CONFLICT" | "FAILED";
 export type ForgeArtifactPublicationStatus = "LOCAL" | "BRANCHED" | "COMMITTED" | "PUSHED" | "PR_CREATED";
@@ -26,15 +27,9 @@ export type ForgeContinuityDependencies = {
   now(): string;
 };
 
-const sensitivePath = /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.npmrc|\.pypirc|id_rsa|id_ed25519|credentials?|secrets?)(\/|$)/i;
 export function assertContinuityPatchSafe(artifact: ForgeContinuityArtifact) {
-  if (artifact.status !== "READY") throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: seul un artifact READY peut être publié.");
-  if (!artifact.patch || artifact.patch.includes("\0")) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch artifact invalide.");
-  if (artifact.changedFiles.some((path) => !path || path.startsWith("/") || path.includes("\\") || path.split("/").includes("..") || sensitivePath.test(path))) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch sensible ou hors repository refusé.");
-  for (const line of artifact.patch.split("\n")) {
-    if (!/^(?:diff --git|--- |\+\+\+ )/.test(line) || /(?:---|\+\+\+) \/dev\/null$/.test(line)) continue;
-    if (/ (?:a|b)?\/\.\.\//.test(line) || / (?:a|b)?\/(?:\.env(?:[./]|$)|\.git(?:\/|$)|node_modules(?:\/|$)|credentials?(?:[./]|$)|secrets?(?:[./]|$))/i.test(line)) throw new ForgeAgentError("INVALID_INPUT", "SENSITIVE_FILES: patch sensible ou hors repository refusé.");
-  }
+  const blocker = getForgeArtifactPublicationBlocker(artifact);
+  if (blocker) throw new ForgeAgentError(blocker.includes("200000") ? "LIMIT" : "INVALID_INPUT", `${blocker.includes("200000") ? "ARTIFACT_TOO_LARGE" : "SENSITIVE_FILES"}: ${blocker}`);
 }
 export function normalizeForgeBranchName(value: unknown) {
   if (typeof value !== "string") throw new ForgeAgentError("INVALID_INPUT", "INVALID_BRANCH: nom de branche invalide.");
@@ -76,13 +71,27 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
     return { workspace, runtime, artifact, run, adapter: deps.runtime(userId, conversationId) };
   }
 
+  async function ownedArtifact(userId: string, conversationId: string, artifactId: string) {
+    if (!userId.trim()) throw new ForgeAgentError("UNAUTHENTICATED", "AUTH_REQUIRED: authentification requise.");
+    const [workspace, artifact] = await Promise.all([deps.getWorkspace(userId, conversationId), deps.getArtifact(userId, artifactId)]);
+    if (!workspace || !artifact) throw new ForgeAgentError("NOT_FOUND", "OWNERSHIP_DENIED: artifact Forge introuvable.");
+    const run = await deps.getRun(userId, artifact.runId);
+    if (!run || run.conversationId !== conversationId || run.projectId !== workspace.projectId || artifact.repository !== workspace.repository) throw new ForgeAgentError("NOT_FOUND", "OWNERSHIP_DENIED: artifact Forge non autorisé pour ce projet.");
+    return { workspace, artifact, run };
+  }
+
   async function restore(userId: string, conversationId: string, artifactId: string, allowBaseMismatch = false) {
     const target = await owned(userId, conversationId, artifactId);
     if (target.artifact.status === "EMPTY") return deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORED", restoredAt: deps.now(), restoredRuntimeId: target.runtime.runtimeId, conflictFiles: [] });
     assertContinuityPatchSafe(target.artifact);
     await deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORING", conflictFiles: [] });
-    const existingChanges = changedFiles(await target.adapter.getGitStatus());
-    if (existingChanges.length > 0) return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: existingChanges });
+    const existingStatus = await target.adapter.getGitStatus();
+    const existingChanges = changedFiles(existingStatus);
+    if (existingChanges.length > 0) {
+      const existingDiff = await target.adapter.getGitDiff();
+      if (!existingDiff.truncated && sameFiles(target.artifact.changedFiles, existingChanges) && existingDiff.patch === target.artifact.patch) return deps.updateArtifact(userId, artifactId, { restoreStatus: "RESTORED", restoredAt: deps.now(), restoredRuntimeId: target.runtime.runtimeId, conflictFiles: [] });
+      return deps.updateArtifact(userId, artifactId, { restoreStatus: "CONFLICT", conflictFiles: existingChanges });
+    }
     const temporaryPath = `.noline/restore-${target.artifact.artifactId}.patch`;
     try {
       await target.adapter.writeFile(temporaryPath, target.artifact.patch);
@@ -107,11 +116,16 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
       if (target.artifact.branchName === branch) return target.artifact;
       throw new ForgeAgentError("CONFLICT", "ALREADY_PUBLISHED: une branche de publication existe déjà.");
     }
-    if (target.artifact.restoreStatus !== "RESTORED") throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez l’artifact avant de créer la branche.");
+    if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.restoredRuntimeId !== target.runtime.runtimeId) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez cet artifact dans le runtime actif avant de créer la branche.");
+    assertContinuityPatchSafe(target.artifact);
     const head = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "Lecture du HEAD échouée");
     if (head !== target.artifact.baseCommitSha) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: la branche doit partir du SHA attendu.");
     const exists = await git(target.adapter, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-    if (exists.exitCode === 0) throw new ForgeAgentError("CONFLICT", "BRANCH_EXISTS: cette branche existe déjà.");
+    if (exists.exitCode === 0) {
+      const currentBranch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "COMMIT_FAILED: lecture de branche échouée");
+      if (currentBranch === branch) return deps.updateArtifact(userId, artifactId, { publicationStatus: "BRANCHED", branchName: branch });
+      throw new ForgeAgentError("CONFLICT", "BRANCH_EXISTS: cette branche existe déjà.");
+    }
     if (exists.exitCode !== 1) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED: impossible de vérifier la branche.");
     succeeded(await git(target.adapter, ["switch", "-c", branch, target.artifact.baseCommitSha]), "COMMIT_FAILED: création de branche échouée");
     return deps.updateArtifact(userId, artifactId, { publicationStatus: "BRANCHED", branchName: branch });
@@ -121,7 +135,7 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
     requireConfirmation(confirmed, "créer le commit");
     const message = normalizeForgeCommitMessage(messageInput), target = await owned(userId, conversationId, artifactId);
     if (["COMMITTED", "PUSHED", "PR_CREATED"].includes(target.artifact.publicationStatus) && target.artifact.commitSha) return target.artifact;
-    if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.publicationStatus !== "BRANCHED" || !target.artifact.branchName) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez l’artifact et créez une branche avant le commit.");
+    if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.restoredRuntimeId !== target.runtime.runtimeId || target.artifact.publicationStatus !== "BRANCHED" || !target.artifact.branchName) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez cet artifact dans le runtime actif et créez une branche avant le commit.");
     assertContinuityPatchSafe(target.artifact);
     const branch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "COMMIT_FAILED: lecture de branche échouée");
     if (branch !== target.artifact.branchName || /^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: le commit doit cibler la branche Forge confirmée.");
@@ -154,12 +168,14 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
     const header = `AUTHORIZATION: basic ${encodeBasic(credential.username, credential.password)}`;
     const result = await git(target.adapter, ["-c", `http.https://github.com/.extraheader=${header}`, "push", "origin", `${target.artifact.commitSha}:refs/heads/${branch}`]);
     if (result.timedOut || result.exitCode !== 0) throw new ForgeAgentError("CONFLICT", "PUSH_REJECTED: GitHub a refusé le push non forcé.");
+    const verified = await deps.preparePush(userId, target.artifact.repository, branch).catch(() => null);
+    if (!verified || verified.remoteSha !== target.artifact.commitSha) throw new ForgeAgentError("CONFLICT", "PUSH_REJECTED: la branche distante ne correspond pas au commit attendu.");
     return deps.updateArtifact(userId, artifactId, { publicationStatus: "PUSHED", remoteBranch: branch, publishedAt: deps.now() });
   }
 
   async function createPullRequest(userId: string, conversationId: string, artifactId: string, titleInput: unknown, bodyInput: unknown, confirmed: unknown) {
     requireConfirmation(confirmed, "créer la Pull Request");
-    const title = normalizeForgeCommitMessage(titleInput), target = await owned(userId, conversationId, artifactId);
+    const title = normalizeForgeCommitMessage(titleInput), target = await ownedArtifact(userId, conversationId, artifactId);
     if (target.artifact.publicationStatus === "PR_CREATED" && target.artifact.pullRequestUrl && target.artifact.pullRequestNumber) return target.artifact;
     if (target.artifact.publicationStatus !== "PUSHED" || !target.artifact.remoteBranch || !deps.createPullRequest) throw new ForgeAgentError("CONFLICT", "PR_FAILED: une branche Forge poussée est requise.");
     const fallback = `Forge AgentRun ${target.artifact.runId}\n\n${target.artifact.changedFiles.length} fichier(s), +${target.artifact.additions}/-${target.artifact.deletions}.\n\nFichiers :\n${target.artifact.changedFiles.map((path) => `- ${path}`).join("\n")}\n\nValidations enregistrées dans la conversation Forge.`;

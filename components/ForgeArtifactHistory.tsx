@@ -5,7 +5,8 @@ import { ArchiveRestore, Download, GitBranch, GitCommit, GitPullRequest, Loader2
 import type { ForgeRunArtifact } from "@/lib/forge/agent-foundation";
 import { listForgeArtifacts, runForgeArtifactAction } from "@/lib/forge/forge-client";
 
-export function ForgeArtifactHistory({ conversationId, runtimeReady }: { conversationId: string; runtimeReady: boolean }) {
+import { getForgeArtifactPublicationBlocker } from "@/lib/forge/artifact-publication";
+export function ForgeArtifactHistory({ conversationId, runtimeReady, runtimeId }: { conversationId: string; runtimeReady: boolean; runtimeId: string | null }) {
   const [artifacts, setArtifacts] = useState<ForgeRunArtifact[]>([]);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
@@ -56,21 +57,28 @@ export function ForgeArtifactHistory({ conversationId, runtimeReady }: { convers
   return <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
     <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-black text-white"><ArchiveRestore className="h-4 w-4 text-noline-orange" />Travail précédent disponible<span className="ml-auto text-[10px] text-noline-muted">{artifacts.length}</span></summary>
     {message ? <p role="status" className="mt-2 text-xs text-amber-200">{message}</p> : null}
-    <div className="mt-3 space-y-2">{artifacts.map((artifact) => <article key={artifact.artifactId} className="rounded-md border border-white/10 bg-black/20 p-2 text-[10px] text-noline-muted">
+    <div className="mt-3 space-y-2">{artifacts.map((artifact) => {
+      const publicationBlocker = getForgeArtifactPublicationBlocker(artifact);
+      const activeWorktree = !publicationBlocker && runtimeReady && artifact.status === "READY" && artifact.restoreStatus === "RESTORED" && artifact.restoredRuntimeId === runtimeId;
+      const needsRestore = artifact.status === "READY" && artifact.publicationStatus === "LOCAL" && !activeWorktree;
+      const localRuntimeRequired = ["LOCAL", "BRANCHED", "COMMITTED"].includes(artifact.publicationStatus);
+      const reason = publicationBlocker || (localRuntimeRequired && !runtimeReady ? "Runtime requis : démarrez ou recréez le runtime pour poursuivre les opérations Git locales." : needsRestore ? "Restaurez le patch vérifié dans le runtime actif avant de créer une branche." : "");
+      return <article key={artifact.artifactId} className="min-w-0 rounded-md border border-white/10 bg-black/20 p-2 text-[10px] text-noline-muted">
       <div className="flex items-center gap-2"><strong className="text-white">{new Date(artifact.createdAt).toLocaleString("fr-FR")}</strong><span>{artifact.changedFiles.length} fichier(s)</span><span className="text-green-300">+{artifact.additions}</span><span className="text-red-300">-{artifact.deletions}</span></div>
-      <p className="mt-1 font-mono">{artifact.runId.slice(0, 8)} · {artifact.sourceBranch} · {artifact.baseCommitSha.slice(0, 12)}</p>
+      <p className="mt-1 break-all font-mono">{artifact.runId.slice(0, 8)} · {artifact.sourceBranch} · {artifact.baseCommitSha.slice(0, 12)}</p>
       <p className="mt-1 font-black text-noline-orange">Publication · {artifact.publicationStatus}</p>
+      {reason ? <p className="mt-1 text-amber-200">{reason}</p> : null}
       {artifact.conflictFiles.length ? <p className="mt-1 text-red-200">Conflit de restauration : {artifact.conflictFiles.join(", ")}</p> : null}
       <div className="mt-2 flex flex-wrap gap-1">
         <details className="rounded border border-white/10 px-2 py-1"><summary className="cursor-pointer text-white">Voir</summary><pre className="mt-2 max-h-56 max-w-full overflow-auto whitespace-pre-wrap font-mono">{artifact.patch || "Aucun changement Git."}</pre></details>
         <button type="button" onClick={() => download(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><Download className="h-3 w-3" />Télécharger</button>
-        {artifact.status === "READY" && artifact.restoreStatus !== "RESTORED" ? <button type="button" disabled={!runtimeReady || working === artifact.artifactId} onClick={() => void restore(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-noline-orange/40 px-2 text-noline-orange disabled:opacity-40">{working === artifact.artifactId ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}Restaurer</button> : null}
-        {artifact.restoreStatus === "RESTORED" && artifact.publicationStatus === "LOCAL" ? <button type="button" onClick={() => void branch(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><GitBranch className="h-3 w-3" />Créer une branche</button> : null}
-        {artifact.publicationStatus === "BRANCHED" ? <button type="button" onClick={() => void commit(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white"><GitCommit className="h-3 w-3" />Créer un commit</button> : null}
-        {artifact.publicationStatus === "COMMITTED" ? <button type="button" disabled={working === artifact.artifactId} onClick={() => void push(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white disabled:opacity-40"><Upload className="h-3 w-3" />Push vers GitHub</button> : null}
+        {needsRestore ? <button type="button" disabled={!runtimeReady || working === artifact.artifactId} onClick={() => void restore(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-noline-orange/40 px-2 text-noline-orange disabled:opacity-40">{working === artifact.artifactId ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}Restaurer</button> : null}
+        {activeWorktree && artifact.publicationStatus === "LOCAL" ? <button type="button" disabled={working === artifact.artifactId} onClick={() => void branch(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white disabled:opacity-40"><GitBranch className="h-3 w-3" />Créer une branche</button> : null}
+        {artifact.publicationStatus === "BRANCHED" ? <button type="button" disabled={!activeWorktree || working === artifact.artifactId} onClick={() => void commit(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white disabled:opacity-40"><GitCommit className="h-3 w-3" />Créer un commit</button> : null}
+        {artifact.publicationStatus === "COMMITTED" ? <button type="button" disabled={!activeWorktree || working === artifact.artifactId} onClick={() => void push(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white disabled:opacity-40"><Upload className="h-3 w-3" />Push vers GitHub</button> : null}
         {artifact.publicationStatus === "PUSHED" ? <button type="button" disabled={working === artifact.artifactId} onClick={() => void pullRequest(artifact)} className="flex min-h-8 items-center gap-1 rounded border border-white/10 px-2 text-white disabled:opacity-40"><GitPullRequest className="h-3 w-3" />Créer une Pull Request</button> : null}
         {artifact.pullRequestUrl ? <a href={artifact.pullRequestUrl} target="_blank" rel="noreferrer" className="flex min-h-8 items-center rounded border border-white/10 px-2 text-noline-orange">Ouvrir la PR</a> : null}
       </div>
-    </article>)}</div>
+    </article>; })}</div>
   </details>;
 }

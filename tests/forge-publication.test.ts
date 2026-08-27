@@ -20,7 +20,7 @@ function harness(options: { artifact?: Record<string, unknown>; commands?: Retur
     async getRun() { return { runId: "run-p", userId: "user-p", projectId: "project-p", conversationId: "conversation-p", workspaceId: "workspace-p", runtimeId: "runtime-p", status: "COMPLETED", objective: "mission", baseCommitSha: "a".repeat(40), plan: [], finalReport: "done", createdAt: "", startedAt: "", completedAt: "", lastActivityAt: "", error: null }; },
     async updateArtifact(_userId: string, _artifactId: string, update: Record<string, unknown>) { updates.push(update); current = { ...current, ...update }; return current; },
     runtime() { return { async writeFile() {}, async deleteFile() {}, async execute(command: { command: string; args: string[] }) { commands.push(command); if (command.args.includes("push")) pushes += 1; return queue.shift() || result(); }, async getGitStatus() { return { added: [], modified: ["src/app.ts"], deleted: [] }; }, async getGitDiff() { return { added: [], modified: ["src/app.ts"], deleted: [], patch: current.patch, truncated: false }; } }; },
-    async preparePush() { return { username: "x-access-token", password: "github-secret", remoteSha: options.remoteSha ?? null }; },
+    async preparePush() { return { username: "x-access-token", password: "github-secret", remoteSha: pushes > 0 ? String(current.commitSha) : options.remoteSha ?? null }; },
     async createPullRequest() { pullRequests += 1; return { number: 42, url: "https://github.com/owner/repo/pull/42", createdAt: "2026-08-26T02:00:00.000Z" }; },
     now: () => "2026-08-26T02:00:00.000Z",
   });
