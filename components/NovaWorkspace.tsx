@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Archive, Check, Copy, FolderPlus, Loader2, MessageSquarePlus, MoreHorizontal, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import type { Conversation, ConversationStatus, Message, Project } from "@/lib/chat/conversation-store";
 import { DEFAULT_NOVA_MODEL } from "@/lib/chat/nova-model";
+import { NOVA_INITIAL_SOURCE_LIMIT, readNovaWebSources, type NovaWebSource } from "@/lib/chat/nova-web-metadata";
 import {
   createConversation, createProject, deleteConversation, deleteProject, listConversations, listMessages,
   listProjects, NovaClientError, sendMessage, setConversationStatus, setProjectStatus
@@ -174,5 +175,43 @@ export function NovaWorkspace() {
 function ListHeader({ title, status, onStatus, loading = false }: { title: string; status: ConversationStatus; onStatus: (status: ConversationStatus) => void; loading?: boolean }) { return <div><div className="flex items-center gap-2"><h2 className="text-sm font-black text-white">{title}</h2>{loading ? <Loader2 className="h-4 w-4 animate-spin text-noline-orange" /> : null}</div><div className="mt-2 flex gap-1" role="group" aria-label={`Filtrer ${title}`}><FilterButton active={status === "active"} onClick={() => onStatus("active")}>Actifs</FilterButton><FilterButton active={status === "archived"} onClick={() => onStatus("archived")}>Archivés</FilterButton></div></div>; }
 function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" onClick={onClick} className={`rounded px-2 py-1 text-[10px] font-black uppercase tracking-wider ${active ? "bg-noline-orange text-noline-black" : "bg-white/5 text-noline-muted"}`}>{children}</button>; }
 function ResourceRow({ selected, label, sublabel, archived, working, onSelect, onStatus, onDelete }: { selected: boolean; label: string; sublabel?: string; archived: boolean; working: boolean; onSelect: () => void; onStatus: () => void; onDelete: () => void }) { return <div className={`flex items-center gap-1 rounded-md border ${selected ? "border-noline-orange bg-noline-orange/15" : "border-white/10 bg-white/5"}`}><button type="button" onClick={onSelect} className="min-w-0 flex-1 px-3 py-2 text-left"><span className="block truncate text-sm font-black text-white">{label}</span>{sublabel ? <span className="mt-1 block truncate text-[10px] font-bold uppercase tracking-wider text-noline-muted">{sublabel}</span> : null}</button><details className="relative"><summary aria-label={`Actions pour ${label}`} className="list-none cursor-pointer rounded p-2 text-noline-muted hover:text-white"><MoreHorizontal className="h-4 w-4" /></summary><div className="absolute right-0 z-20 mt-1 w-32 rounded-md border border-white/10 bg-noline-black p-1 shadow-xl"><button type="button" disabled={working} onClick={onStatus} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-white hover:bg-white/10">{archived ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}{archived ? "Restaurer" : "Archiver"}</button><button type="button" disabled={working} onClick={onDelete} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-red-300 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />Supprimer</button></div></details></div>; }
-function MessageBubble({ message }: { message: Message }) { const [copied, setCopied] = useState(false); const user = message.role === "USER"; async function copy() { try { await navigator.clipboard.writeText(message.content); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); } } return <article className={`group flex ${user ? "justify-end" : "justify-start"}`}><div className={`relative max-w-[85%] rounded-xl px-4 py-3 ${user ? "bg-noline-orange text-noline-black" : "border border-white/10 bg-white/5 text-white"}`}><div className="mb-1 flex items-center justify-between gap-4"><p className="text-[10px] font-black uppercase tracking-[0.16em] opacity-60">{message.role}</p><button type="button" onClick={copy} aria-label={`Copier le message ${message.role}`} className="flex items-center gap-1 rounded p-1 text-[10px] opacity-70 transition hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><span>{copied ? "Copié" : "Copier"}</span>{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}</button></div><p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p></div></article>; }
+function MessageBubble({ message }: { message: Message }) {
+  const [copied, setCopied] = useState(false);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const user = message.role === "USER";
+  const sources = readNovaWebSources(message.metadata);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch { setCopied(false); }
+  }
+
+  return <article className={`group flex ${user ? "justify-end" : "justify-start"}`}>
+    <div className={`relative min-w-0 max-w-[92%] rounded-xl px-4 py-3 sm:max-w-[85%] ${user ? "bg-noline-orange text-noline-black" : "border border-white/10 bg-white/5 text-white"}`}>
+      <div className="mb-1 flex items-center justify-between gap-4"><p className="text-[10px] font-black uppercase tracking-[0.16em] opacity-60">{message.role}</p><button type="button" onClick={copy} aria-label={`Copier le message ${message.role}`} className="flex items-center gap-1 rounded p-1 text-[10px] opacity-70 transition hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><span>{copied ? "Copié" : "Copier"}</span>{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}</button></div>
+      <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+      {!user && sources.length > 0 ? <SourcesList sources={sources} expanded={sourcesExpanded} onToggle={() => setSourcesExpanded((value) => !value)} /> : null}
+    </div>
+  </article>;
+}
+
+function SourcesList({ sources, expanded, onToggle }: { sources: NovaWebSource[]; expanded: boolean; onToggle: () => void }) {
+  const visibleSources = expanded ? sources : sources.slice(0, NOVA_INITIAL_SOURCE_LIMIT);
+  const hiddenCount = sources.length - NOVA_INITIAL_SOURCE_LIMIT;
+  return <div className="mt-3 min-w-0 border-t border-white/10 pt-2">
+    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-noline-muted">Sources</p>
+    <ul className="mt-1.5 space-y-1.5">{visibleSources.map((source) => <li key={source.url} className="min-w-0">
+      <a href={source.url} target="_blank" rel="noreferrer noopener" title={source.title} className="block min-w-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-left transition hover:border-noline-orange/50">
+        <span className="block truncate text-xs font-bold text-white">{source.title}</span>
+        {source.domain ? <span className="mt-0.5 block truncate text-[10px] text-noline-muted">{source.domain}</span> : null}
+      </a>
+    </li>)}</ul>
+    {hiddenCount > 0 ? <button type="button" onClick={onToggle} aria-expanded={expanded} className="mt-2 min-h-9 rounded-md px-2 text-xs font-bold text-noline-orange hover:bg-white/5 hover:text-white">
+      {expanded ? "Réduire les sources" : `Voir toutes les sources (${sources.length})`}
+    </button> : null}
+  </div>;
+}
 function mergeMessages(current: Message[], incoming: Message[]) { const map = new Map(current.map((message) => [message.id, message])); for (const message of incoming) map.set(message.id, message); return [...map.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)); }

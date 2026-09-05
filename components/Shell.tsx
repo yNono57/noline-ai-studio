@@ -9,6 +9,7 @@ import {
   Palette, Settings, Sparkles, UsersRound, Workflow
 } from "lucide-react";
 import { Brand } from "./Brand";
+import { MobileNavigation } from "./MobileNavigation";
 
 type ProductKey = "nova" | "muse" | "forge" | "apex";
 type NavItem = { href?: string; label: string; future?: boolean };
@@ -81,14 +82,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <footer className="mt-4 shrink-0"><div className="rounded-lg border border-noline-orange/40 bg-noline-orange/10 p-4"><BriefcaseBusiness className="h-5 w-5 text-noline-orange" /><p className="mt-3 text-sm font-black text-white">NOLINE Pro</p><p className="mt-1 text-xs leading-5 text-noline-muted">Votre production, vos clients et vos documents au même endroit.</p></div></footer>
       </aside>
       <div className="min-w-0">
-        <header className={`sticky top-0 z-30 border-b border-white/10 bg-noline-black/88 backdrop-blur-xl lg:hidden ${forgeWorkspace ? "hidden" : ""}`}>
-          <div className="flex items-center justify-between px-4 py-4"><Link href="/dashboard"><Brand /></Link><Link href="/generate" className="rounded-md bg-noline-orange px-4 py-2 text-sm font-black text-noline-black">Créer</Link></div>
-          <nav aria-label="Produits NØLINE AI" className="flex gap-2 overflow-x-auto border-t border-white/10 px-4 py-2">
-            <Link href="/dashboard" className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold ${active("/dashboard") ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}><BarChart3 className="h-4 w-4" />Dashboard</Link>
-            {products.map((product) => { const Icon = product.icon; const expanded = openProduct === product.key; return <button key={product.key} type="button" aria-expanded={expanded} aria-controls={`mobile-${product.key}-menu`} onClick={() => setOpenProduct((current) => current === product.key ? null : product.key)} className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold ${routeProduct === product.key ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}`}><Icon className="h-4 w-4" />{product.label}<ChevronDown className={`h-3 w-3 transition ${expanded ? "rotate-180" : ""}`} /></button>; })}
-          </nav>
-          {openProduct ? <MobileProductMenu product={products.find((product) => product.key === openProduct)!} active={active} /> : null}
-        </header>
+        <MobileNavigation active={active} />
         <main className={forgeWorkspace ? "min-w-0 px-2 py-2 sm:px-3 sm:py-3 lg:px-4" : "mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"}>{children}</main>
       </div>
     </div>
@@ -101,14 +95,10 @@ function ProductMenu({ product, open, active, onToggle }: { product: Product; op
   return <div><button type="button" aria-expanded={open} aria-controls={`${product.key}-menu`} onClick={onToggle} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-black transition ${productActive ? "bg-noline-orange/15 text-white" : "text-noline-muted hover:bg-white/10 hover:text-white"}`}><Icon className={`h-4 w-4 ${productActive ? "text-noline-orange" : ""}`} /><span className="flex-1 text-left">{product.label}</span><ChevronDown className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`} /></button>{open ? <div id={`${product.key}-menu`} className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-2">{product.items.map((item) => <ProductItem key={item.label} item={item} active={active} />)}</div> : null}</div>;
 }
 
-function MobileProductMenu({ product, active }: { product: Product; active: (href: string) => boolean }) {
-  return <nav id={`mobile-${product.key}-menu`} aria-label={`Navigation ${product.label}`} className="flex gap-2 overflow-x-auto border-t border-white/10 px-4 py-2">{product.items.map((item) => <ProductItem key={item.label} item={item} active={active} mobile />)}</nav>;
-}
-
-function ProductItem({ item, active, mobile = false }: { item: NavItem; active: (href: string) => boolean; mobile?: boolean }) {
-  const classes = mobile ? `shrink-0 rounded-md px-3 py-2 text-xs font-bold ${item.href && active(item.href) ? "bg-white text-noline-black" : "bg-white/5 text-noline-muted"}` : `flex items-center justify-between rounded-md px-3 py-2 text-xs font-bold transition ${item.href && active(item.href) ? "bg-white text-noline-black" : "text-noline-muted hover:bg-white/10 hover:text-white"}`;
+function ProductItem({ item, active }: { item: NavItem; active: (href: string) => boolean }) {
+  const classes = `flex items-center justify-between rounded-md px-3 py-2 text-xs font-bold transition ${item.href && active(item.href) ? "bg-white text-noline-black" : "text-noline-muted hover:bg-white/10 hover:text-white"}`;
   if (item.href) return <Link href={item.href} className={classes}>{item.label}</Link>;
-  return <span aria-disabled="true" className={`${classes} cursor-not-allowed opacity-45`}>{item.label}<span className={mobile ? "ml-2 text-[9px] uppercase" : "text-[9px] uppercase"}>Bientôt</span></span>;
+  return <span aria-disabled="true" className={`${classes} cursor-not-allowed opacity-45`}>{item.label}<span className="text-[9px] uppercase">Bientôt</span></span>;
 }
 
 function productForPath(pathname: string): ProductKey | null {

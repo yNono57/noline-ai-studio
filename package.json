@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@daytona/sdk": "0.207.0",
+    "@supabase/supabase-js": "2.114.0",
     "lucide-react": "0.468.0",
     "next": "^16.2.6",
     "openai": "4.103.0",

@@ -60,7 +60,16 @@ export async function POST(request: Request, { params }: RouteContext) {
       const assistantMessage = await createMessage(user.id, conversationId, {
         role: "ASSISTANT",
         content: reply.text,
-        metadata: { model: reply.model, reply_to_message_id: userMessage.id }
+        metadata: {
+          model: reply.model,
+          reply_to_message_id: userMessage.id,
+          responseId: reply.responseId,
+          searchUsed: reply.searchUsed,
+          searchFailed: reply.searchFailed || false,
+          sources: reply.sources,
+          webSearchCallCount: reply.webSearchCallCount,
+          usage: reply.usage,
+        }
       });
       return NextResponse.json(
         { user_message: userMessage, assistant_message: assistantMessage },
