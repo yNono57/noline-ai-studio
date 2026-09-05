@@ -51,9 +51,50 @@ test("E commit avec fichier sensible est refusé avant Git", async () => {
 });
 
 test("F commit valide persiste COMMITTED et le SHA", async () => {
-  const sha = "c".repeat(40), target = harness({ commands: [result(0, "forge/session-p"), result(0), result(1), result(0), result(0, sha)] });
+  const sha = "c".repeat(40), base = "a".repeat(40), patch = artifact().patch;
+  const target = harness({ commands: [
+    result(0, "forge/session-p"),
+    result(0, base),
+    result(0),
+    result(0, "src/app.ts"),
+    result(0, patch),
+    result(1),
+    result(0),
+    result(0, sha),
+    result(0, base),
+    result(0, "src/app.ts"),
+    result(0, patch),
+  ] });
   const committed = await target.service.commit("user-p", "conversation-p", "artifact-p", "Forge controlled commit", true);
   assert.equal(committed.publicationStatus, "COMMITTED"); assert.equal(committed.commitSha, sha);
+  assert.deepEqual(target.commands.find((command) => command.args.includes("commit"))?.args.slice(0, 5), ["-c", "user.name=NØLINE Forge", "-c", "user.email=forge@noline-ai.fr", "commit"]);
+});
+
+test("F2 aucun changement indexé est classifié NOTHING_TO_COMMIT", async () => {
+  const base = "a".repeat(40), patch = artifact().patch;
+  const target = harness({ commands: [
+    result(0, "forge/session-p"), result(0, base), result(0), result(0, "src/app.ts"), result(0, patch), result(0),
+  ] });
+  await assert.rejects(() => target.service.commit("user-p", "conversation-p", "artifact-p", "Forge controlled commit", true), /reason: NOTHING_TO_COMMIT/);
+  assert.equal(target.current().publicationStatus, "BRANCHED");
+});
+
+test("F3 exit 128 conserve un diagnostic classifié sans fuite de token", async () => {
+  const base = "a".repeat(40), patch = artifact().patch, token = "github_pat_supersecrettoken";
+  const target = harness({ commands: [
+    result(0, "forge/session-p"),
+    result(0, base),
+    result(0),
+    result(0, "src/app.ts"),
+    result(0, patch),
+    result(1),
+    result(128, "", `Author identity unknown Authorization: Bearer ${token}`),
+  ] });
+  await assert.rejects(
+    () => target.service.commit("user-p", "conversation-p", "artifact-p", "Forge controlled commit", true),
+    (error: Error) => { assert.match(error.message, /operation: commit/); assert.match(error.message, /exitCode: 128/); assert.match(error.message, /reason: GIT_IDENTITY_MISSING/); assert.doesNotMatch(error.message, new RegExp(token)); return true; },
+  );
+  assert.equal(target.current().publicationStatus, "BRANCHED");
 });
 
 test("G push sans confirmation est refusé", async () => {

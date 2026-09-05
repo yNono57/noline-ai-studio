@@ -47,8 +47,31 @@ function normalizePullRequestBody(value: unknown, fallback: string) {
   return value.trim();
 }
 function requireConfirmation(value: unknown, action: string) { if (value !== true) throw new ForgeAgentError("CONFLICT", `AUTH_REQUIRED: Confirmation explicite requise pour ${action}.`); }
-function succeeded(result: ForgeRuntimeCommandResult, label: string) {
-  if (result.timedOut || result.exitCode !== 0) throw new ForgeAgentError("CONFLICT", `${label} (exitCode=${result.exitCode ?? "null"}).`);
+export type ForgeGitFailureReason = "GIT_IDENTITY_MISSING" | "NOT_A_GIT_REPOSITORY" | "BRANCH_MISMATCH" | "WORKTREE_MISMATCH" | "NOTHING_TO_COMMIT" | "INDEX_LOCKED" | "GIT_COMMAND_FAILED";
+export function sanitizeForgeGitOutput(value: string, max = 2_000) {
+  return value
+    .replace(/(https?:\/\/)[^/@\s]+:[^@\s]+@/gi, "$1[REDACTED]@")
+    .replace(/\b(?:Bearer|Basic)\s+\S+/gi, (match) => `${match.split(/\s/, 1)[0]} [REDACTED]`)
+    .replace(/\b(?:github_pat_|gh[opsur]_|sk-|vcp_)[A-Za-z0-9_-]{8,}/gi, "[REDACTED]")
+    .replace(/(?:API_KEY|PRIVATE_KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)\s*[:=]\s*\S+/gi, "[REDACTED]")
+    .slice(0, max)
+    .trim();
+}
+export function classifyForgeGitFailure(result: ForgeRuntimeCommandResult): ForgeGitFailureReason {
+  const output = `${result.stderr}\n${result.stdout}`;
+  if (/author identity unknown|unable to auto-detect email address|no email was given|please tell me who you are/i.test(output)) return "GIT_IDENTITY_MISSING";
+  if (/not a git repository/i.test(output)) return "NOT_A_GIT_REPOSITORY";
+  if (/index\.lock|another git process seems to be running|unable to create .*\.lock/i.test(output)) return "INDEX_LOCKED";
+  if (/nothing to commit|no changes added to commit/i.test(output)) return "NOTHING_TO_COMMIT";
+  return "GIT_COMMAND_FAILED";
+}
+function failedGit(result: ForgeRuntimeCommandResult, operation: string, label: string, reason = classifyForgeGitFailure(result)): never {
+  const stdout = sanitizeForgeGitOutput(result.stdout) || "(vide)";
+  const stderr = sanitizeForgeGitOutput(result.stderr) || "(vide)";
+  throw new ForgeAgentError("CONFLICT", `${label}\noperation: ${operation}\nexitCode: ${result.exitCode ?? "null"}\nreason: ${reason}\nstdout: ${stdout}\nstderr: ${stderr}`);
+}
+function succeeded(result: ForgeRuntimeCommandResult, label: string, operation = "git") {
+  if (result.timedOut || result.exitCode !== 0) failedGit(result, operation, label);
   return result.stdout.trim();
 }
 function git(runtime: ForgeContinuityRuntimeAdapter, args: string[]) { return runtime.execute({ command: "git", args, cwd: ".", timeoutMs: 60_000, maxOutputBytes: 250_000 }); }
@@ -59,6 +82,8 @@ function encodeBasic(username: string, password: string) {
 }
 function changedFiles(status: ForgeRuntimeGitStatus) { return [...new Set([...status.added, ...status.modified, ...status.deleted])].sort(); }
 function sameFiles(left: string[], right: string[]) { return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort()); }
+function outputFiles(output: string) { return [...new Set(output.split(/\r?\n/).map((path) => path.trim()).filter(Boolean))].sort(); }
+function samePatch(left: string, right: string) { return left.replace(/\r\n/g, "\n").trimEnd() === right.replace(/\r\n/g, "\n").trimEnd(); }
 
 export function createForgeContinuityService(deps: ForgeContinuityDependencies) {
   async function owned(userId: string, conversationId: string, artifactId: string) {
@@ -137,16 +162,33 @@ export function createForgeContinuityService(deps: ForgeContinuityDependencies) 
     if (["COMMITTED", "PUSHED", "PR_CREATED"].includes(target.artifact.publicationStatus) && target.artifact.commitSha) return target.artifact;
     if (target.artifact.restoreStatus !== "RESTORED" || target.artifact.restoredRuntimeId !== target.runtime.runtimeId || target.artifact.publicationStatus !== "BRANCHED" || !target.artifact.branchName) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: restaurez cet artifact dans le runtime actif et créez une branche avant le commit.");
     assertContinuityPatchSafe(target.artifact);
-    const branch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "COMMIT_FAILED: lecture de branche échouée");
-    if (branch !== target.artifact.branchName || /^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: le commit doit cibler la branche Forge confirmée.");
+    const branch = succeeded(await git(target.adapter, ["branch", "--show-current"]), "COMMIT_FAILED: lecture de branche échouée", "branch_verification");
+    if (branch !== target.artifact.branchName || /^(?:main|master)$/i.test(branch)) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: BRANCH_MISMATCH\nLe commit doit cibler la branche Forge confirmée.");
     const status = await target.adapter.getGitStatus();
-    if (!sameFiles(target.artifact.changedFiles, changedFiles(status))) throw new ForgeAgentError("CONFLICT", "WORKTREE_NOT_READY: les fichiers du working tree diffèrent de l’artifact.");
-    succeeded(await git(target.adapter, ["add", "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: préparation du commit échouée");
+    const headBefore = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "COMMIT_FAILED: lecture du HEAD échouée", "head_verification");
+    if (headBefore !== target.artifact.baseCommitSha) {
+      if (changedFiles(status).length !== 0) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: WORKTREE_MISMATCH\nLe HEAD et le working tree ne correspondent pas à l’artifact attendu.");
+      const parent = succeeded(await git(target.adapter, ["rev-parse", "HEAD^"]), "COMMIT_FAILED: lecture du parent échouée", "retry_parent_verification");
+      const committedFiles = outputFiles(succeeded(await git(target.adapter, ["diff", "--name-only", target.artifact.baseCommitSha, headBefore, "--"]), "COMMIT_FAILED: lecture des fichiers commités échouée", "retry_files_verification"));
+      const committedPatch = succeeded(await git(target.adapter, ["diff", "--no-ext-diff", "--no-color", target.artifact.baseCommitSha, headBefore, "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: lecture du diff commité échouée", "retry_diff_verification");
+      if (parent === target.artifact.baseCommitSha && sameFiles(target.artifact.changedFiles, committedFiles) && samePatch(target.artifact.patch, committedPatch)) return deps.updateArtifact(userId, artifactId, { publicationStatus: "COMMITTED", commitSha: headBefore });
+      throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: WORKTREE_MISMATCH\nLe commit existant ne correspond pas exactement à l’artifact attendu.");
+    }
+    if (!sameFiles(target.artifact.changedFiles, changedFiles(status))) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: WORKTREE_MISMATCH\nLes fichiers du working tree diffèrent de l’artifact.");
+    succeeded(await git(target.adapter, ["add", "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: préparation du commit échouée", "artifact_staging");
+    const stagedFiles = outputFiles(succeeded(await git(target.adapter, ["diff", "--cached", "--name-only", "--"]), "COMMIT_FAILED: lecture des fichiers indexés échouée", "staged_files_verification"));
+    const stagedPatch = succeeded(await git(target.adapter, ["diff", "--cached", "--no-ext-diff", "--no-color", "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: lecture du diff indexé échouée", "staged_diff_verification");
+    if (!sameFiles(target.artifact.changedFiles, stagedFiles) || !samePatch(target.artifact.patch, stagedPatch)) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: WORKTREE_MISMATCH\nLe contenu indexé ne correspond pas exactement à l’artifact.");
     const staged = await git(target.adapter, ["diff", "--cached", "--quiet"]);
-    if (staged.exitCode !== 1 || staged.timedOut) throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED: aucun changement validé à committer.");
-    succeeded(await git(target.adapter, ["commit", "-m", message]), "COMMIT_FAILED: création du commit échouée");
-    const sha = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "COMMIT_FAILED: lecture du commit échouée");
-    return deps.updateArtifact(userId, artifactId, { publicationStatus: "COMMITTED", commitSha: sha });
+    if (staged.exitCode !== 1 || staged.timedOut) failedGit(staged, "staged_changes_verification", "COMMIT_FAILED", "NOTHING_TO_COMMIT");
+    const commitResult = await git(target.adapter, ["-c", "user.name=NØLINE Forge", "-c", "user.email=forge@noline-ai.fr", "commit", "-m", message]);
+    if (commitResult.timedOut || commitResult.exitCode !== 0) failedGit(commitResult, "commit", "COMMIT_FAILED");
+    const sha = succeeded(await git(target.adapter, ["rev-parse", "HEAD"]), "COMMIT_FAILED: lecture du commit échouée", "commit_sha_verification");
+    const parent = succeeded(await git(target.adapter, ["rev-parse", "HEAD^"]), "COMMIT_FAILED: lecture du parent échouée", "commit_parent_verification");
+    const committedFiles = outputFiles(succeeded(await git(target.adapter, ["diff", "--name-only", target.artifact.baseCommitSha, sha, "--"]), "COMMIT_FAILED: lecture des fichiers commités échouée", "commit_files_verification"));
+    const committedPatch = succeeded(await git(target.adapter, ["diff", "--no-ext-diff", "--no-color", target.artifact.baseCommitSha, sha, "--", ...target.artifact.changedFiles]), "COMMIT_FAILED: lecture du diff commité échouée", "commit_diff_verification");
+    if (sha !== headBefore && parent === target.artifact.baseCommitSha && sameFiles(target.artifact.changedFiles, committedFiles) && samePatch(target.artifact.patch, committedPatch)) return deps.updateArtifact(userId, artifactId, { publicationStatus: "COMMITTED", commitSha: sha });
+    throw new ForgeAgentError("CONFLICT", "COMMIT_FAILED\nreason: WORKTREE_MISMATCH\nLe commit créé ne correspond pas exactement à l’artifact attendu.");
   }
 
   async function push(userId: string, conversationId: string, artifactId: string, confirmed: unknown) {

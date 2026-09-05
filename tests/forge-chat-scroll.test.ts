@@ -35,5 +35,6 @@ test("session mobile garde le chat prioritaire et le Workspace hors du flux", ()
   assert.match(drawer, /onClick=\{onClose\}/);
   const shell = fs.readFileSync("components/Shell.tsx", "utf8");
   assert.equal(shell.includes('const forgeWorkspace = pathname === "/forge"'), true);
-  assert.match(shell, /forgeWorkspace \? "hidden"/);
+  assert.match(shell, /MobileNavigation active=\{active\}/);
+  assert.match(shell, /forgeWorkspace \? "min-w-0 px-2 py-2 sm:px-3 sm:py-3 lg:px-4"/);
 });
