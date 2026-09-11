@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../supabase-server";
+import { coreSupabase, type CoreIdentity } from "./core-supabase";
 
 export type ConversationMode = "CHAT" | "CODE";
 export type ConversationStatus = "active" | "archived";
@@ -72,19 +72,19 @@ export class ConversationStoreError extends Error {
   }
 }
 
-export async function listProjects(userId: string): Promise<Project[]> {
-  requireUserId(userId);
-  return selectMany<Project>(
-    `/rest/v1/projects?user_id=eq.${encode(userId)}&select=*&order=updated_at.desc`
+export async function listProjects(user: CoreIdentity): Promise<Project[]> {
+  requireUser(user);
+  return selectMany<Project>(user,
+    `/rest/v1/projects?user_id=eq.${encode(user.id)}&select=*&order=updated_at.desc`
   );
 }
 
-export async function getProject(userId: string, projectId: string): Promise<Project> {
-  requireUserId(userId);
+export async function getProject(user: CoreIdentity, projectId: string): Promise<Project> {
+  requireUser(user);
   requireId(projectId, "projectId");
 
-  const project = await selectOne<Project>(
-    `/rest/v1/projects?id=eq.${encode(projectId)}&user_id=eq.${encode(userId)}&select=*&limit=1`
+  const project = await selectOne<Project>(user,
+    `/rest/v1/projects?id=eq.${encode(projectId)}&user_id=eq.${encode(user.id)}&select=*&limit=1`
   );
 
   if (!project) {
@@ -95,48 +95,53 @@ export async function getProject(userId: string, projectId: string): Promise<Pro
 }
 
 export async function createProject(
-  userId: string,
+  user: CoreIdentity,
   input: CreateProjectInput
 ): Promise<Project> {
-  requireUserId(userId);
+  requireUser(user);
   requireNonEmpty(input.name, "name");
+  requireEnum(input.status ?? "active", ["active", "archived"], "status");
+  if (input.description != null && typeof input.description !== "string") {
+    throw new ConversationStoreError("INVALID_INPUT", "description invalide.");
+  }
 
-  return insertOne<Project>("/rest/v1/projects", {
-    user_id: userId,
+  return insertOne<Project>(user, "/rest/v1/projects", {
+    user_id: user.id,
     name: input.name.trim(),
     description: input.description ?? null,
     status: input.status ?? "active"
   });
 }
 
-export async function setProjectStatus(userId: string, projectId: string, status: ConversationStatus): Promise<Project> {
-  await getProject(userId, projectId);
-  return updateOne<Project>(`/rest/v1/projects?id=eq.${encode(projectId)}`, { status });
+export async function setProjectStatus(user: CoreIdentity, projectId: string, status: ConversationStatus): Promise<Project> {
+  requireEnum(status, ["active", "archived"], "status");
+  await getProject(user, projectId);
+  return updateOne<Project>(user, `/rest/v1/projects?id=eq.${encode(projectId)}&user_id=eq.${encode(user.id)}`, { status });
 }
 
-export async function deleteProject(userId: string, projectId: string): Promise<void> {
-  await getProject(userId, projectId);
-  await deleteOwned(`/rest/v1/projects?id=eq.${encode(projectId)}`);
+export async function deleteProject(user: CoreIdentity, projectId: string): Promise<void> {
+  await getProject(user, projectId);
+  await deleteOwned(user, `/rest/v1/projects?id=eq.${encode(projectId)}&user_id=eq.${encode(user.id)}`);
 }
 
 export async function listConversations(
-  userId: string,
+  user: CoreIdentity,
   projectId: string
 ): Promise<Conversation[]> {
-  await getProject(userId, projectId);
-  return selectMany<Conversation>(
+  await getProject(user, projectId);
+  return selectMany<Conversation>(user,
     `/rest/v1/conversations?project_id=eq.${encode(projectId)}&select=*&order=updated_at.desc`
   );
 }
 
 export async function getConversation(
-  userId: string,
+  user: CoreIdentity,
   conversationId: string
 ): Promise<Conversation> {
-  requireUserId(userId);
+  requireUser(user);
   requireId(conversationId, "conversationId");
 
-  const conversation = await selectOne<Conversation>(
+  const conversation = await selectOne<Conversation>(user,
     `/rest/v1/conversations?id=eq.${encode(conversationId)}&select=*&limit=1`
   );
 
@@ -144,21 +149,23 @@ export async function getConversation(
     throw notFound("Conversation");
   }
 
-  await getProject(userId, conversation.project_id);
+  await getProject(user, conversation.project_id);
   return conversation;
 }
 
 export async function createConversation(
-  userId: string,
+  user: CoreIdentity,
   projectId: string,
   input: CreateConversationInput
 ): Promise<Conversation> {
-  await getProject(userId, projectId);
+  await getProject(user, projectId);
+  requireEnum(input.mode, ["CHAT", "CODE"], "mode");
+  requireEnum(input.status ?? "active", ["active", "archived"], "status");
   requireNonEmpty(input.agent, "agent");
   requireNonEmpty(input.title, "title");
   requireNonEmpty(input.modelKey, "modelKey");
 
-  return insertOne<Conversation>("/rest/v1/conversations", {
+  return insertOne<Conversation>(user, "/rest/v1/conversations", {
     project_id: projectId,
     mode: input.mode,
     agent: input.agent.trim(),
@@ -168,34 +175,39 @@ export async function createConversation(
   });
 }
 
-export async function setConversationStatus(userId: string, conversationId: string, status: ConversationStatus): Promise<Conversation> {
-  await getConversation(userId, conversationId);
-  return updateOne<Conversation>(`/rest/v1/conversations?id=eq.${encode(conversationId)}`, { status });
+export async function setConversationStatus(user: CoreIdentity, conversationId: string, status: ConversationStatus): Promise<Conversation> {
+  requireEnum(status, ["active", "archived"], "status");
+  await getConversation(user, conversationId);
+  return updateOne<Conversation>(user, `/rest/v1/conversations?id=eq.${encode(conversationId)}`, { status });
 }
 
-export async function deleteConversation(userId: string, conversationId: string): Promise<void> {
-  await getConversation(userId, conversationId);
-  await deleteOwned(`/rest/v1/conversations?id=eq.${encode(conversationId)}`);
+export async function deleteConversation(user: CoreIdentity, conversationId: string): Promise<void> {
+  await getConversation(user, conversationId);
+  await deleteOwned(user, `/rest/v1/conversations?id=eq.${encode(conversationId)}`);
 }
 
 export async function listMessages(
-  userId: string,
+  user: CoreIdentity,
   conversationId: string
 ): Promise<Message[]> {
-  await getConversation(userId, conversationId);
-  return selectMany<Message>(
+  await getConversation(user, conversationId);
+  return selectMany<Message>(user,
     `/rest/v1/messages?conversation_id=eq.${encode(conversationId)}&select=*&order=created_at.asc,id.asc`
   );
 }
 
 export async function createMessage(
-  userId: string,
+  user: CoreIdentity,
   conversationId: string,
   input: CreateMessageInput
 ): Promise<Message> {
-  await getConversation(userId, conversationId);
+  await getConversation(user, conversationId);
 
-  return insertOne<Message>("/rest/v1/messages", {
+  requireEnum(input.role, ["USER", "ASSISTANT", "SYSTEM", "TOOL"], "role");
+  if (typeof input.content !== "string" || (input.metadata != null && (typeof input.metadata !== "object" || Array.isArray(input.metadata)))) {
+    throw new ConversationStoreError("INVALID_INPUT", "Message invalide.");
+  }
+  return insertOne<Message>(user, "/rest/v1/messages", {
     conversation_id: conversationId,
     role: input.role,
     content: input.content,
@@ -203,21 +215,31 @@ export async function createMessage(
   });
 }
 
-function requireUserId(userId: string) {
-  if (!userId?.trim()) {
+function requireUser(user: CoreIdentity) {
+  if (!user || typeof user.id !== "string" || !isUuid(user.id) || typeof user.accessToken !== "string" || !user.accessToken.trim()) {
     throw new ConversationStoreError("UNAUTHENTICATED", "Authentification requise.");
   }
 }
 
 function requireId(value: string, field: string) {
-  if (!value?.trim()) {
+  if (typeof value !== "string" || !isUuid(value)) {
     throw new ConversationStoreError("INVALID_INPUT", `${field} est requis.`);
   }
 }
 
 function requireNonEmpty(value: string, field: string) {
-  if (!value?.trim()) {
+  if (typeof value !== "string" || !value.trim()) {
     throw new ConversationStoreError("INVALID_INPUT", `${field} ne peut pas être vide.`);
+  }
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function requireEnum(value: unknown, allowed: readonly string[], field: string) {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new ConversationStoreError("INVALID_INPUT", field + " invalide.");
   }
 }
 
@@ -232,23 +254,23 @@ function encode(value: string) {
   return encodeURIComponent(value);
 }
 
-async function selectMany<T>(path: string): Promise<T[]> {
+async function selectMany<T>(user: CoreIdentity, path: string): Promise<T[]> {
   try {
-    const data = await supabaseAdmin(path, { method: "GET" });
+    const data = await coreSupabase(user, path, { method: "GET" });
     return Array.isArray(data) ? (data as T[]) : [];
   } catch (error) {
     throw supabaseError(error);
   }
 }
 
-async function selectOne<T>(path: string): Promise<T | null> {
-  const rows = await selectMany<T>(path);
+async function selectOne<T>(user: CoreIdentity, path: string): Promise<T | null> {
+  const rows = await selectMany<T>(user, path);
   return rows[0] ?? null;
 }
 
-async function insertOne<T>(path: string, body: Record<string, unknown>): Promise<T> {
+async function insertOne<T>(user: CoreIdentity, path: string, body: Record<string, unknown>): Promise<T> {
   try {
-    const data = await supabaseAdmin(path, {
+    const data = await coreSupabase(user, path, {
       method: "POST",
       body: JSON.stringify(body)
     });
@@ -265,20 +287,20 @@ async function insertOne<T>(path: string, body: Record<string, unknown>): Promis
   }
 }
 
-async function updateOne<T>(path: string, body: Record<string, unknown>): Promise<T> {
+async function updateOne<T>(user: CoreIdentity, path: string, body: Record<string, unknown>): Promise<T> {
   try {
-    const data = await supabaseAdmin(path, { method: "PATCH", body: JSON.stringify(body) });
+    const data = await coreSupabase(user, path, { method: "PATCH", body: JSON.stringify(body) });
     const row = Array.isArray(data) ? (data[0] as T | undefined) : undefined;
-    if (!row) throw new Error("Supabase n'a retourné aucune ressource mise à jour.");
+    if (!row) throw notFound("Ressource");
     return row;
   } catch (error) {
     throw supabaseError(error);
   }
 }
 
-async function deleteOwned(path: string): Promise<void> {
+async function deleteOwned(user: CoreIdentity, path: string): Promise<void> {
   try {
-    await supabaseAdmin(path, { method: "DELETE" });
+    await coreSupabase(user, path, { method: "DELETE" });
   } catch (error) {
     throw supabaseError(error);
   }
