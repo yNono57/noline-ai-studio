@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   try {
     const user = await authenticate(request);
     const { conversationId } = await params;
-    const messages = await listMessages(user.id, conversationId);
+    const messages = await listMessages(user, conversationId);
     return NextResponse.json({ messages }, { status: 200 });
   } catch (error) {
     return routeErrorResponse(error);
@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const user = await authenticate(request);
     const { conversationId } = await params;
     const input = await parseNovaMessageInput(request);
-    let history = await listMessages(user.id, conversationId);
+    let history = await listMessages(user, conversationId);
     let userMessage: Message;
 
     if (input.userMessageId) {
@@ -37,7 +37,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       }
       userMessage = existing;
     } else {
-      userMessage = await createMessage(user.id, conversationId, {
+      userMessage = await createMessage(user, conversationId, {
         role: "USER",
         content: input.content
       });
@@ -57,7 +57,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     try {
       const reply = await generateNovaReply(history);
-      const assistantMessage = await createMessage(user.id, conversationId, {
+      const assistantMessage = await createMessage(user, conversationId, {
         role: "ASSISTANT",
         content: reply.text,
         metadata: {

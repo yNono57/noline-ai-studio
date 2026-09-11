@@ -5,7 +5,7 @@ import {
   type CreateConversationInput,
   type CreateProjectInput
 } from "@/lib/chat/conversation-store";
-import { getUserFromRequest } from "@/lib/supabase-server";
+import type { CoreIdentity } from "@/lib/chat/core-supabase";
 import { withNovaModel } from "@/lib/chat/nova-model";
 
 class NovaApiError extends Error {
@@ -15,11 +15,28 @@ class NovaApiError extends Error {
   }
 }
 
-export async function authenticate(request: Request) {
-  const user = await getUserFromRequest(request);
-  if (!user) throw new NovaApiError(401, "Authentification requise.");
-  return user;
+export async function authenticate(request: Request): Promise<CoreIdentity> {
+  const match = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") || "");
+  if (!match) throw new NovaApiError(401, "Authentification requise.");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new NovaApiError(503, "Authentification indisponible.");
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: { apikey: key, Authorization: `Bearer ${match[1]}` },
+    cache: "no-store"
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new NovaApiError(401, "Authentification requise.");
+  }
+  if (!response.ok) throw new NovaApiError(503, "Authentification indisponible.");
+  const user = await response.json();
+  if (!user || typeof user.id !== "string" || !UUID.test(user.id)) {
+    throw new NovaApiError(401, "Authentification requise.");
+  }
+  return { id: user.id, accessToken: match[1] };
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function parseProjectInput(request: Request): Promise<CreateProjectInput> {
   const body = await parseObject(request);
@@ -51,8 +68,8 @@ export async function parseConversationInput(
 
 export async function parseNovaMessageInput(request: Request) {
   const body = await parseObject(request);
-  if (body.user_message_id !== undefined && typeof body.user_message_id !== "string") {
-    throw invalid("user_message_id doit être une chaîne.");
+  if (body.user_message_id !== undefined && (typeof body.user_message_id !== "string" || !UUID.test(body.user_message_id))) {
+    throw invalid("user_message_id doit être un UUID.");
   }
   return {
     content: requiredString(body.content, "content"),
@@ -85,7 +102,7 @@ export function routeErrorResponse(error: unknown) {
     }
   }
 
-  console.error("[nova-api] Request failed", error);
+  console.error("[nova-api] Request failed", error instanceof ConversationStoreError ? error.code : "INTERNAL_ERROR");
   return NextResponse.json({ error: "Erreur serveur inattendue." }, { status: 500 });
 }
 

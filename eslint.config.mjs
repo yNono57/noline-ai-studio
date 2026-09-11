@@ -17,6 +17,17 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["tests/*.test.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        require: "readonly", global: "readonly", process: "readonly",
+        URL: "readonly", Headers: "readonly", Request: "readonly", Response: "readonly"
+      }
+    },
+    rules: { "@typescript-eslint/no-require-imports": "off" }
+  },
+  {
     files: ["**/*.{js,mjs}"],
     languageOptions: {
       globals: {
