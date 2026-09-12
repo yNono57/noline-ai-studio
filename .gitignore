@@ -29,6 +29,7 @@ pnpm-debug.log*
 .npm-cache/
 outputs/
 work/
+supabase/.temp/
 
 # System files
 .DS_Store
