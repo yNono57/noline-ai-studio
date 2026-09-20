@@ -6,6 +6,7 @@ import {
   parseNovaMessageInput,
   routeErrorResponse
 } from "../../../_shared";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 type RouteContext = { params: Promise<{ conversationId: string }> };
 
@@ -22,6 +23,8 @@ export async function GET(request: Request, { params }: RouteContext) {
 
 export async function POST(request: Request, { params }: RouteContext) {
   try {
+    const access = await protectPaidApi(request, "nova-message", PAID_API_LIMITS.generation);
+    if ("response" in access) return access.response;
     const user = await authenticate(request);
     const { conversationId } = await params;
     const input = await parseNovaMessageInput(request);

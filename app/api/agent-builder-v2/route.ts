@@ -4,6 +4,7 @@ import {
   MockAgentBuilderGateway,
   OpenAIAgentBuilderGateway
 } from "@/src/modules/agent-builder/services";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 import type {
   AgentRoadmap,
   AIImplementationPlan,
@@ -54,6 +55,9 @@ const MAX_IDEA_LENGTH = 2_000;
 
 export async function POST(request: Request) {
   try {
+    const access = await protectPaidApi(request, "agent-builder-v2", PAID_API_LIMITS.agentBuilder);
+    if ("response" in access) return access.response;
+
     const body: unknown = await request.json();
     const idea = readIdea(body);
 

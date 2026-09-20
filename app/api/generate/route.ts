@@ -6,11 +6,11 @@ import { logGenerationError } from "@/lib/server-diagnostics";
 import {
   ensureProfile,
   getQuotaState,
-  getUserFromRequest,
   incrementQuota,
   isSupabaseServerConfigured,
   saveGeneratedText
 } from "@/lib/supabase-server";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 type GenerateRequest = {
   generatorId: GeneratorId;
@@ -23,6 +23,10 @@ export async function POST(request: Request) {
   let userId: string | null = null;
 
   try {
+    const access = await protectPaidApi(request, "generate", PAID_API_LIMITS.generation);
+    if ("response" in access) return access.response;
+    userId = access.user.id;
+
     const body = (await request.json()) as GenerateRequest;
     generatorId = body.generatorId;
     const generator = generators.find((item) => item.id === body.generatorId);
@@ -33,8 +37,7 @@ export async function POST(request: Request) {
 
     const supabaseEnabled = isSupabaseServerConfigured();
     stage = "authenticate_user";
-    const user = supabaseEnabled ? await getUserFromRequest(request) : null;
-    userId = user?.id || null;
+    const user = access.user;
     let quotaState: Awaited<ReturnType<typeof getQuotaState>> | null = null;
 
     if (supabaseEnabled) {

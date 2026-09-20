@@ -4,8 +4,6 @@ import { getOfficialAgent } from "@/lib/official-agents";
 import {
   createWorkflow,
   getAgent,
-  getUserFromRequest,
-  isSupabaseServerConfigured,
   listClientMemory,
   saveAgentGeneration,
   updateWorkflow
@@ -14,6 +12,7 @@ import {
   normalizeWorkflow,
   type WorkflowStep
 } from "@/lib/workflows";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 type WorkflowBody = {
   input?: unknown;
@@ -38,11 +37,9 @@ export async function POST(
   let currentSteps: WorkflowStep[] = [];
 
   try {
-    if (!isSupabaseServerConfigured()) {
-      return NextResponse.json({ error: "Supabase n’est pas configuré." }, { status: 503 });
-    }
-    const user = await getUserFromRequest(request);
-    if (!user) return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
+    const access = await protectPaidApi(request, "agent-workflow", PAID_API_LIMITS.agentWorkflow);
+    if ("response" in access) return access.response;
+    const user = access.user;
     userId = user.id;
 
     const { id: agentId } = await params;

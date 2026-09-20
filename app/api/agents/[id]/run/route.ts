@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import {
   getAgent,
   getGeneration,
-  getUserFromRequest,
   isSupabaseServerConfigured,
   saveAgentGeneration
 } from "@/lib/supabase-server";
@@ -13,6 +12,7 @@ import {
   type GenerationRecord
 } from "@/lib/history";
 import { logGenerationError } from "@/lib/server-diagnostics";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 interface RunAgentBody {
   input?: unknown;
@@ -33,6 +33,10 @@ export async function POST(
   let userId: string | null = null;
 
   try {
+    const access = await protectPaidApi(request, "agent-run", PAID_API_LIMITS.generation);
+    if ("response" in access) return access.response;
+    userId = access.user.id;
+
     const { id } = await params;
     agentId = id;
     const body = (await request.json()) as RunAgentBody;
@@ -57,8 +61,7 @@ export async function POST(
 
     if (isSupabaseServerConfigured()) {
       stage = "authenticate_user";
-      const user = await getUserFromRequest(request);
-      userId = user?.id || null;
+      const user = access.user;
 
       if (!officialAgent) {
         if (!user) {
