@@ -28,3 +28,17 @@ test("the paid API guard fails closed and emits 401, 429 and Retry-After", () =>
   assert.match(source, /status: 429/);
   assert.match(source, /Retry-After/);
 });
+test("Forge polling stays authenticated without consuming the paid POST limit", () => {
+  const source = readFileSync(
+    "app/api/forge/conversations/[conversationId]/agent-runs/route.ts",
+    "utf8"
+  );
+  const getHandler = source.slice(
+    source.indexOf("export async function GET"),
+    source.indexOf("export async function POST")
+  );
+  const postHandler = source.slice(source.indexOf("export async function POST"));
+  assert.doesNotMatch(getHandler, /protectPaidApi\(/);
+  assert.match(getHandler, /authenticateForge\(/);
+  assert.match(postHandler, /protectPaidApi\(/);
+});

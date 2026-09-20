@@ -11,7 +11,7 @@ export const maxDuration = 300;
 type Context = { params: Promise<{ conversationId: string }> };
 
 export async function GET(request: Request, { params }: Context) {
-  try { const access = await protectPaidApi(request, "forge-agent-run", PAID_API_LIMITS.forgeAgentRun); if ("response" in access) return access.response; const user = await authenticateForge(request); const { conversationId } = await params; const agentRuns = await listForgeAgentRunViews(user.id, conversationId); return NextResponse.json({ agentRun: agentRuns.at(-1) || null, agentRuns }); }
+  try { const user = await authenticateForge(request); const { conversationId } = await params; const agentRuns = await listForgeAgentRunViews(user.id, conversationId); return NextResponse.json({ agentRun: agentRuns.at(-1) || null, agentRuns }); }
   catch (error) { return agentErrorResponse(error); }
 }
 export async function POST(request: Request, { params }: Context) {
