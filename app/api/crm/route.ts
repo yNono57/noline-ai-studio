@@ -7,6 +7,7 @@ import {
   supabaseAdmin
 } from "@/lib/supabase-server";
 import { normalizeProspect } from "@/lib/crm";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 export async function GET(request: Request) {
   try {
@@ -34,6 +35,8 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
 
     if (body.action === "summary") {
+      const access = await protectPaidApi(request, "crm-summary", PAID_API_LIMITS.generation);
+      if ("response" in access) return access.response;
       return summarizeProspect(user.id, String(body.prospectId || ""));
     }
     if (!String(body.company || "").trim()) {

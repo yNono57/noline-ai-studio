@@ -1,4 +1,6 @@
 -- PROPOSITION UNIQUEMENT : ne pas exécuter sans revue et migration approuvée.
+-- Remplacée par migrations/20260911204606_noline_core_data_v1.sql.
+-- Conservée comme référence historique et fixture de compatibilité des tests.
 -- La Service Role contourne la RLS. Toute route serveur qui l'utilise doit donc
 -- vérifier explicitement l'identité de l'utilisateur et sa propriété du projet.
 

@@ -4,6 +4,7 @@ import type { AgencyClient } from "@/lib/agency";
 import { buildOfficialAgentPrompt, isSupporterOrganization } from "@/lib/agent-prompts";
 import { getOfficialAgent } from "@/lib/official-agents";
 import { logGenerationError } from "@/lib/server-diagnostics";
+import { PAID_API_LIMITS, protectPaidApi } from "@/lib/paid-api-security";
 
 type RequestBody = {
   agentId: string;
@@ -16,6 +17,9 @@ export async function POST(request: Request) {
   let agentId: string | null = null;
 
   try {
+    const access = await protectPaidApi(request, "generate-agent", PAID_API_LIMITS.generation);
+    if ("response" in access) return access.response;
+
     const body = (await request.json()) as RequestBody;
     agentId = body.agentId;
     const agent = getOfficialAgent(body.agentId);
