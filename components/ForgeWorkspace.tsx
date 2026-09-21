@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Archive, ArrowDown, ArrowLeft, Check, Code2, Copy, Github, Loader2, Menu, MoreHorizontal, PanelRight, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react";
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
@@ -249,7 +250,7 @@ export function ForgeWorkspace() {
 
   return <div className="min-w-0">
     {!conversationId ? <header className="mb-5"><p className="text-xs font-black uppercase tracking-[0.24em] text-noline-orange">NØLINE Forge</p><h1 className="mt-2 text-2xl font-black text-white sm:text-3xl">Development workspace</h1><p className="mt-2 text-sm text-noline-muted">Choisissez un projet et une session pour ouvrir votre environnement de travail.</p></header> : null}
-    {error ? <div role="alert" className="mb-3 rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+    {error ? <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"><span>{error}</span>{authBlocked ? <Link href="/login" className="rounded-md bg-white px-3 py-2 text-xs font-black text-noline-black">Se connecter</Link> : null}</div> : null}
     <div className={`grid min-w-0 gap-3 ${workspaceOpen ? "xl:grid-cols-[16rem_minmax(0,1fr)_23rem]" : "xl:grid-cols-[16rem_minmax(0,1fr)]"}`}>
       {navigationOpen ? <button type="button" aria-label="Fermer la navigation Forge" onClick={() => setNavigationOpen(false)} className="fixed inset-0 z-30 bg-black/70 xl:hidden" /> : null}
       <aside aria-label="Navigation Forge" className={`surface premium-border fixed inset-y-0 left-0 z-40 w-[min(88vw,19rem)] overflow-y-auto p-4 shadow-2xl transition-transform xl:static xl:z-auto xl:h-[calc(100dvh-2rem)] xl:w-auto xl:translate-x-0 xl:rounded-xl xl:shadow-premium ${navigationOpen || !conversationId ? "translate-x-0" : "-translate-x-full"}`}>

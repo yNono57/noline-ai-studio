@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Archive, Check, Copy, FolderPlus, Loader2, MessageSquarePlus, MoreHorizontal, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import type { Conversation, ConversationStatus, Message, Project } from "@/lib/chat/conversation-store";
 import { DEFAULT_NOVA_MODEL } from "@/lib/chat/nova-model";
@@ -159,7 +160,7 @@ export function NovaWorkspace() {
 
   return <div className="space-y-5">
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-noline-orange">NØLINE Nova</p><h1 className="mt-2 text-3xl font-black text-white">Votre espace conversationnel</h1><p className="mt-2 text-sm text-noline-muted">Organisez vos échanges par projet, avec un historique persistant.</p></div><div className="flex items-center gap-2 text-xs font-bold text-noline-muted"><Sparkles className="h-4 w-4 text-noline-orange" /> Nova · {INITIAL_MODEL_KEY}</div></header>
-    {error ? <div role="alert" className="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+    {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"><span>{error}</span>{authBlocked ? <Link href="/login" className="rounded-md bg-white px-3 py-2 text-xs font-black text-noline-black">Se connecter</Link> : null}</div> : null}
     <div className="grid min-h-[66vh] gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="surface premium-border rounded-xl p-4 shadow-premium">
         <ListHeader title="Projets" status={projectView} onStatus={(status) => { setProjectView(status); setProjectId(projects.find((item) => item.status === status)?.id || ""); }} loading={loading} />
