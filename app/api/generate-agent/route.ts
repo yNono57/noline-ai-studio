@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import type { AgencyClient } from "@/lib/agency";
+import { createOpenAIModelGateway } from "@/lib/ai/gateway/factory";
+import { modelId } from "@/lib/ai/gateway/contracts";
+import { agentId as coreAgentId, userId as coreUserId } from "@/lib/core/shared/ids";
+import { userOwnership } from "@/lib/core/identity/contracts";
 import { buildOfficialAgentPrompt, isSupporterOrganization } from "@/lib/agent-prompts";
 import { getOfficialAgent } from "@/lib/official-agents";
 import { logGenerationError } from "@/lib/server-diagnostics";
@@ -40,19 +43,24 @@ export async function POST(request: Request) {
       });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    stage = "openai_chat_completion";
-    const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    const selectedModel = modelId(process.env.OPENAI_MODEL || "gpt-4.1-mini");
+    const gateway = createOpenAIModelGateway(process.env.OPENAI_API_KEY, selectedModel);
+    stage = "model_gateway_generation";
+    const completion = await gateway.generate({
+      model: selectedModel,
       messages: [
         { role: "system", content: agent.systemPrompt },
         { role: "user", content: prompt }
       ],
       temperature: 0.7,
-      max_tokens: 1800
+      maxOutputUnits: 1800,
+      attribution: {
+        ownership: userOwnership(coreUserId(access.user.id)),
+        agentId: coreAgentId(agent.id)
+      }
     });
 
-    const output = completion.choices[0]?.message?.content?.trim();
+    const output = completion.text.trim();
     if (!output) {
       return NextResponse.json({ error: "Aucun contenu généré." }, { status: 502 });
     }
