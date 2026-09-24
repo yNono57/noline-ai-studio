@@ -1,4 +1,5 @@
 import "server-only";
+import { assertSupabaseMutationEnvironment, isMutationMethod } from "../environment-identity";
 
 /** A verified Supabase user and their request-scoped access token. Never service role. */
 export type CoreIdentity = { id: string; accessToken: string };
@@ -7,6 +8,7 @@ export async function coreSupabase(user: CoreIdentity, path: string, init: Reque
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("Supabase n'est pas configuré.");
+  if (isMutationMethod(init.method)) assertSupabaseMutationEnvironment();
   const response = await fetch(`${url}${path}`, {
     ...init,
     headers: {

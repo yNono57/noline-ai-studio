@@ -1,4 +1,5 @@
 import type { GeneratorId } from "./generators";
+import { assertSupabaseMutationEnvironment, isMutationMethod } from "./environment-identity";
 
 type SupabaseUser = {
   id: string;
@@ -383,6 +384,8 @@ export async function supabaseAdmin(path: string, init: RequestInit = {}) {
   if (!url || !serviceKey) {
     throw new Error("Supabase serveur n'est pas configure.");
   }
+  if (isMutationMethod(init.method)) assertSupabaseMutationEnvironment();
+
 
   const response = await fetch(`${url}${path}`, {
     ...init,
