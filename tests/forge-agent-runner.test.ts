@@ -383,7 +383,7 @@ test("annulation empêche tout appel modèle ou outil", async () => { const targ
 test("annulation pendant un outil ne peut pas réactiver le run", async () => { const checks = [false, false, false, false, true]; const target = harness([{ type: "PLAN", summary: "plan", plan: ["status"] }, { type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }], () => checks.shift() ?? true); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "CANCELLED"); assert.equal(target.run()?.status, "CANCELLED"); });test("limite outils arrête la boucle", async () => { const decisions = [{ type: "PLAN", summary: "plan", plan: ["inspecter"] }, ...Array.from({ length: FORGE_AGENT_LIMITS.maxToolCalls + 1 }, () => ({ type: "TOOL_CALL", summary: "status", tool: "git_status", input: {} }))]; const target = harness(decisions); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.run()?.status, "FAILED"); });
 test("filesystem normalise les slashs terminaux et refuse traversal, absolu et fichiers sensibles", () => { assert.equal(normalizeAgentPath("src/", true), "src"); assert.equal(normalizeAgentPath("./src/", true), "src"); assert.equal(normalizeAgentPath("src/components/", true), "src/components"); assert.throws(() => normalizeAgentPath("../secret")); assert.throws(() => normalizeAgentPath("/etc/passwd")); assert.throws(() => normalizeAgentPath("C:/Windows")); assert.throws(() => normalizeAgentPath(".env")); assert.equal(normalizeAgentPath(".env.example"), ".env.example"); });
 test("command policy refuse shell, secrets, host et Git write", () => { for (const input of [{ command: "bash", args: [], cwd: "." }, { command: "node", args: ["/etc/passwd"], cwd: "." }, { command: "git", args: ["status"], cwd: "." }, { command: "npm", args: ["publish"], cwd: "." }, { command: "vercel", args: ["deploy"], cwd: "." }, { command: "env", args: [], cwd: "." }, { command: "npm", args: ["install", "--token", "provider-secret"], cwd: "." }]) assert.throws(() => normalizeAgentCommand(input)); assert.equal(normalizeAgentCommand({ command: "npm", args: ["test"], cwd: ".", timeoutMs: 999999 }).timeoutMs, 60_000); });
-test("protocole modèle borne les décisions et outils", () => { const source = fs.readFileSync("lib/forge/agent-model.ts", "utf8"); for (const type of ["PLAN", "TOOL_CALL", "FINAL", "FAIL"]) assert.match(source, new RegExp(type)); assert.doesNotMatch(source, /git_push|git_commit/); assert.match(source, /jsonMode: true/); assert.match(source, /RECOVERY/); assert.match(source, /INSPECTION_SATISFIED/); for (const tool of ["list_files", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"]) assert.match(source, new RegExp(tool)); });
+test("protocole modèle borne les décisions et outils", () => { const source = fs.readFileSync("lib/forge/agent-model.ts", "utf8"); for (const type of ["PLAN", "TOOL_CALL", "FINAL", "FAIL"]) assert.match(source, new RegExp(type)); assert.doesNotMatch(source, /git_push|git_commit/); assert.match(source, /jsonMode: true/); assert.match(source, /RECOVERY/); assert.match(source, /INSPECTION_SATISFIED/); for (const tool of ["list_files", "search_code", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"]) assert.match(source, new RegExp(tool)); });
 test("redaction supprime tokens et secrets des résumés", () => { const text = sanitizeAgentText("OPENAI_API_KEY=super-secret-value ghp_abcdefghijklmnopqrstuvwxyz https://user:password@example.com Bearer provider-token"); assert.doesNotMatch(text, /super-secret|ghp_|user:password|provider-token/); });
 test("routes agentiques exigent authenticateForge et n’exposent aucun secret", () => { for (const path of ["app/api/forge/conversations/[conversationId]/agent-runs/route.ts", "app/api/forge/conversations/[conversationId]/agent-runs/[runId]/route.ts"]) { const source = fs.readFileSync(path, "utf8"); assert.match(source, /authenticateForge\(request\)/); assert.doesNotMatch(source, /DAYTONA_API_KEY|GITHUB_APP_PRIVATE_KEY|providerRuntimeId/); } });
 test("limite étapes empêche toute boucle infinie", async () => { const target = harness(Array.from({ length: FORGE_AGENT_LIMITS.maxSteps }, () => ({ type: "PLAN", summary: "plan", plan: ["continuer"] }))); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.steps.length, FORGE_AGENT_LIMITS.maxSteps); });
@@ -793,6 +793,69 @@ test("diagnostic de validation ignore la bannière Node.js et lit le vrai fichie
   assert.equal(result.status, "COMPLETED");
   assert.ok(target.reads.includes("src/App.tsx"));
   assert.equal(target.reads.includes("Node.js"), false);
+});
+test("recovery découvre le code pertinent après des lectures ambiguës puis corrige et valide", async () => {
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Explorer src", tool: "list_files", input: { path: "src" } },
+    { type: "TOOL_CALL", summary: "Lire types non pertinents", tool: "read_file", input: { path: "src/modules/agent-builder/types/index.ts" } },
+    { type: "TOOL_CALL", summary: "Lire package", tool: "read_file", input: { path: "package.json" } },
+    { type: "FAIL", summary: "Contexte insuffisant", error: "Je manque de contexte pour localiser le Model Gateway et les contrats Usage." },
+    (context: Record<string, unknown>, constraint?: Record<string, unknown>) => {
+      assert.equal(constraint?.phase, "DISCOVERY_REQUIRED");
+      assert.deepEqual(constraint?.allowedTools, ["search_code", "list_files", "read_file"]);
+      assert.match(JSON.stringify(context), /RECOVERY_DISCOVERY/);
+      return { type: "TOOL_CALL", summary: "Rechercher les contrats", tool: "search_code", input: { query: "ModelGateway|UsageEvent", path: "." } };
+    },
+    (context: Record<string, unknown>) => { assert.match(JSON.stringify(context), /lib\/ai\/gateway\/model-gateway\.ts/); return { type: "TOOL_CALL", summary: "Lire le gateway partagé", tool: "read_file", input: { path: "lib/ai/gateway/model-gateway.ts" } }; },
+    { type: "TOOL_CALL", summary: "Ajouter l'adaptation", tool: "write_file", input: { path: "lib/forge/usage-adapter.ts", content: "export const usage = 'UNKNOWN';" } },
+    { type: "TOOL_CALL", summary: "Tester", tool: "run_command", input: { command: "npm", args: ["test"], cwd: ".", validation: true } },
+    { type: "FINAL", summary: "Terminé", report: "Adaptation ajoutée et tests réussis." },
+    { type: "FINAL", summary: "Terminé", report: "Adaptation ajoutée, tests et Git status réussis." },
+    { type: "FINAL", summary: "Terminé", report: "Adaptation ajoutée, tests, Git status et Git diff réussis; publication disponible ensuite dans le panneau contrôlé." },
+  ], false, {
+    files: {
+      "package.json": '{"scripts":{"test":"node --test"}}',
+      "src/modules/agent-builder/types/index.ts": "export type AgentBuilder = unknown;",
+      "lib/ai/gateway/model-gateway.ts": "export interface ModelGateway {}",
+    },
+    commandResults: [
+      { stdout: "lib/ai/gateway/model-gateway.ts:1:export interface ModelGateway {}\nlib/core/usage/usage.ts:1:export type UsageEvent = unknown", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 4 },
+      { stdout: "tests PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 8 },
+    ],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Intègre Usage au Model Gateway, ajoute des tests et prépare ensuite une PR contrôlée.");
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(target.commands[0]?.command, "rg");
+  assert.ok(target.reads.includes("lib/ai/gateway/model-gateway.ts"));
+  assert.ok(target.writes.includes("lib/forge/usage-adapter.ts"));
+  assert.equal(target.constraints.filter((constraint) => constraint?.phase === "DISCOVERY_REQUIRED").length, 1);
+  assert.equal(target.artifacts.length, 1);
+});
+test("découverte non pertinente répétée s'arrête au budget borné", async () => {
+  const decisions: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < FORGE_AGENT_LIMITS.maxRecoveryDiscoveryCalls; index += 1) {
+    decisions.push({ type: "FAIL", summary: "Contexte insuffisant", error: "Je manque de contexte pour localiser le code pertinent." });
+    decisions.push({ type: "TOOL_CALL", summary: `Recherche sans résultat ${index}`, tool: "search_code", input: { query: `missing-symbol-${index}`, path: "." } });
+  }
+  decisions.push({ type: "FAIL", summary: "Toujours insuffisant", error: "Je manque encore de contexte pour localiser le code pertinent." });
+  const target = harness(decisions, false, { commandResults: Array.from({ length: FORGE_AGENT_LIMITS.maxRecoveryDiscoveryCalls }, () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false, truncated: false, durationMs: 2 })) });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Modifie le code pertinent et teste le résultat."), /découverte de récupération Forge est épuisée/);
+  assert.equal(target.commands.length, FORGE_AGENT_LIMITS.maxRecoveryDiscoveryCalls);
+  assert.ok(target.steps.length < FORGE_AGENT_LIMITS.maxSteps);
+  assert.equal(target.artifacts.length, 0);
+});
+test("refus explicite malgré un contexte suffisant reste terminal sans découverte libre", async () => {
+  const refusal = { type: "FAIL", summary: "Refus", error: "Je refuse d'appliquer la mutation demandée." };
+  const target = harness([
+    { type: "TOOL_CALL", summary: "Lire cible", tool: "read_file", input: { path: "src/index.ts" } },
+    refusal,
+    refusal,
+    refusal,
+  ], false, { files: { "src/index.ts": "export const value = 1;" } });
+  await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Modifie src/index.ts et teste le résultat."), /refuse de progresser/);
+  assert.equal(target.constraints.some((constraint) => constraint?.phase === "DISCOVERY_REQUIRED"), false);
+  assert.equal(target.writes.length, 0);
+  assert.equal(target.artifacts.length, 0);
 });
 test("ENOENT du cwd Daytona ne transforme pas package.json repository en fichier absent", async () => {
   const typecheck = { type: "TOOL_CALL", summary: "Typecheck", tool: "run_command", input: { command: "npm", args: ["run", "typecheck"], validation: true } };
