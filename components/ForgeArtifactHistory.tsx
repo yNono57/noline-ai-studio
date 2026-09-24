@@ -6,7 +6,7 @@ import type { ForgeRunArtifact } from "@/lib/forge/agent-foundation";
 import { listForgeArtifacts, runForgeArtifactAction } from "@/lib/forge/forge-client";
 
 import { getForgeArtifactPublicationBlocker } from "@/lib/forge/artifact-publication";
-export function ForgeArtifactHistory({ conversationId, runtimeReady, runtimeId }: { conversationId: string; runtimeReady: boolean; runtimeId: string | null }) {
+export function ForgeArtifactHistory({ conversationId, runtimeReady, runtimeId, refreshKey = "" }: { conversationId: string; runtimeReady: boolean; runtimeId: string | null; refreshKey?: string }) {
   const [artifacts, setArtifacts] = useState<ForgeRunArtifact[]>([]);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
@@ -17,7 +17,7 @@ export function ForgeArtifactHistory({ conversationId, runtimeReady, runtimeId }
     if (!conversationId) return () => { active = false; };
     listForgeArtifacts(conversationId).then(({ artifacts }) => { if (active) setArtifacts(artifacts); }).catch((error) => { if (active) setMessage(error instanceof Error ? error.message : "Artifacts indisponibles."); });
     return () => { active = false; };
-  }, [conversationId]);
+  }, [conversationId, refreshKey]);
 
   function replace(artifact: ForgeRunArtifact) { setArtifacts((current) => current.map((item) => item.artifactId === artifact.artifactId ? artifact : item)); }
   async function action(artifact: ForgeRunArtifact, input: Record<string, unknown>) {

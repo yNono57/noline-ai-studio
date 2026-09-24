@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, Clock3, Heart, History, Plus, Sparkles, UsersRound } from "lucide-react";
+import { Bot, Clock3, Code2, Heart, History, MessageCircle, Plus, Sparkles, UsersRound } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { readAgents } from "@/lib/agents";
 import { readClients } from "@/lib/agency";
@@ -57,7 +57,9 @@ export function DashboardOverview() {
             <h2 className="mt-2 text-2xl font-black text-white">Continuer votre travail</h2>
           </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Shortcut href="/nova" label="Ouvrir Nova" description="Discuter, rechercher sur le web et reprendre vos conversations" icon={MessageCircle} />
+          <Shortcut href="/forge" label="Ouvrir Forge" description="Travailler sur un repository dans un sandbox contrôlé" icon={Code2} />
           <Shortcut href="/agent-builder" label="Créer un agent" description="Concevoir un spécialiste sur mesure" icon={Plus} />
           <Shortcut href="/agents" label="Voir les agents" description="Lancer un agent officiel ou personnel" icon={Bot} />
           <Shortcut href="/history" label="Historique" description="Retrouver et réutiliser les résultats" icon={History} />

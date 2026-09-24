@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Archive, ArrowDown, ArrowLeft, Check, Code2, Copy, Github, Loader2, Menu, MoreHorizontal, PanelRight, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react";
 import type { ForgeConversation, ForgeMessage, ForgeProject } from "@/lib/forge/forge-store";
 import type { ForgeGitHubFile } from "@/lib/forge/github-foundation";
@@ -249,7 +250,7 @@ export function ForgeWorkspace() {
 
   return <div className="min-w-0">
     {!conversationId ? <header className="mb-5"><p className="text-xs font-black uppercase tracking-[0.24em] text-noline-orange">NØLINE Forge</p><h1 className="mt-2 text-2xl font-black text-white sm:text-3xl">Development workspace</h1><p className="mt-2 text-sm text-noline-muted">Choisissez un projet et une session pour ouvrir votre environnement de travail.</p></header> : null}
-    {error ? <div role="alert" className="mb-3 rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+    {error ? <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"><span>{error}</span>{authBlocked ? <Link href="/login" className="rounded-md bg-white px-3 py-2 text-xs font-black text-noline-black">Se connecter</Link> : null}</div> : null}
     <div className={`grid min-w-0 gap-3 ${workspaceOpen ? "xl:grid-cols-[16rem_minmax(0,1fr)_23rem]" : "xl:grid-cols-[16rem_minmax(0,1fr)]"}`}>
       {navigationOpen ? <button type="button" aria-label="Fermer la navigation Forge" onClick={() => setNavigationOpen(false)} className="fixed inset-0 z-30 bg-black/70 xl:hidden" /> : null}
       <aside aria-label="Navigation Forge" className={`surface premium-border fixed inset-y-0 left-0 z-40 w-[min(88vw,19rem)] overflow-y-auto p-4 shadow-2xl transition-transform xl:static xl:z-auto xl:h-[calc(100dvh-2rem)] xl:w-auto xl:translate-x-0 xl:rounded-xl xl:shadow-premium ${navigationOpen || !conversationId ? "translate-x-0" : "-translate-x-full"}`}>
@@ -282,7 +283,7 @@ export function ForgeWorkspace() {
         <section id="forge-workspace-source" className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><div className="flex items-center gap-2"><Github className="h-4 w-4 text-noline-orange" /><h3 className="text-xs font-black uppercase tracking-wide text-white">Source</h3></div><div className="mt-3 space-y-2 text-xs text-noline-muted"><p className="truncate">Repository · {project?.repository_identifier || "Non connecté"}</p><p className="truncate">Branche · {project?.default_branch || "Non connectée"}</p><p>Contexte · {(contextByConversation[conversationId] || []).length} fichier(s)</p><p>GitHub · publication contrôlée par utilisateur</p></div></section>
         <ForgeWorkspaceControl project={project} conversationId={conversationId} agentLaunchRequest={agentLaunchRequest} onAgentLaunchRequestHandled={(id) => setAgentLaunchRequest((current) => current?.id === id ? null : current)} onAgentActiveChange={(active) => { setAgentActive(active); if (!active) setNotice(""); }} onRuntimeReadyChange={(ready) => { setAgentAvailable(ready); if (!ready) setComposerMode("chat"); }} onRuntimeChange={setRuntimeView} onConversationUpdated={(updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))} onAgentPayloadChange={handleAgentPayload} onAgentMessagesPersisted={(persisted) => { setMessages((current) => mergeMessages(current, persisted)); setPendingAgentMission(null); }} onAgentLaunchSettled={() => { agentSubmissionInFlight.current = false; }} />
         <ForgeGitDiffPanel conversationId={conversationId} active={workspaceOpen && workspaceSection === "git" && (runtimeReady || Boolean(agentPayload?.artifact))} artifact={agentPayload?.artifact || null} />
-        <ForgeArtifactHistory conversationId={conversationId} runtimeReady={runtimeReady} runtimeId={runtimeView?.runtimeId || null} />
+        <ForgeArtifactHistory conversationId={conversationId} runtimeReady={runtimeReady} runtimeId={runtimeView?.runtimeId || null} refreshKey={agentPayload?.artifact?.artifactId || ""} />
         <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3" open={workspaceSection === "source"}><summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-xs font-black text-white"><Menu className="h-4 w-4 text-noline-orange" />Files & contexte</summary><ForgeGitHubPanel project={project} conversationId={conversationId} contextFiles={contextByConversation[conversationId] || []} onProject={(updated) => setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))} onContext={(files) => setContextByConversation((current) => ({ ...current, [conversationId]: files }))} /></details>
       </ForgeWorkspaceDrawer>
     </div>
