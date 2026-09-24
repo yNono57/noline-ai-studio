@@ -3,15 +3,19 @@ import { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } from "./agent-limits";
 
 export const FORGE_AGENT_LIMITS = { maxSteps: 60, maxToolCalls: 48, maxRuntimeSeconds: 240, maxCommandTimeoutMs: 60_000, maxOutputCharacters: 20_000, maxObjectiveCharacters: FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS, maxRecoveryDiscoveryCalls: 6 } as const;
 export type ForgeAgentRunStatus = "QUEUED" | "PLANNING" | "RUNNING" | "VALIDATING" | "COMPLETED" | "FAILED" | "CANCELLED";
-export type ForgeAgentStepType = "PLAN" | "TOOL_CALL" | "FINAL" | "FAIL";
-export type ForgeAgentToolName = "list_files" | "search_code" | "read_file" | "write_file" | "delete_file" | "run_command" | "git_status" | "git_diff";
+export const FORGE_AGENT_STEP_TYPES = ["PLAN", "TOOL_CALL", "FINAL", "FAIL"] as const;
+export type ForgeAgentStepType = (typeof FORGE_AGENT_STEP_TYPES)[number];
+export const FORGE_AGENT_TOOL_NAMES = ["list_files", "search_code", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"] as const;
+export type ForgeAgentToolName = (typeof FORGE_AGENT_TOOL_NAMES)[number];
+export const FORGE_AGENT_STEP_STATUSES = ["RUNNING", "COMPLETED", "FAILED"] as const;
+export type ForgeAgentStepStatus = (typeof FORGE_AGENT_STEP_STATUSES)[number];
 export type ForgeAgentRun = { runId: string; userId: string; projectId: string; conversationId: string; workspaceId: string; runtimeId: string; status: ForgeAgentRunStatus; objective: string; baseCommitSha: string; plan: string[]; finalReport: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; lastActivityAt: string | null; error: string | null };
 export type ForgeAgentRunView = Omit<ForgeAgentRun, "userId">;
 export const FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS = 200_000;
 export type ForgeRunArtifactStatus = "READY" | "EMPTY";
 export type ForgeRunArtifact = { artifactId: string; runId: string; repository: string; baseCommitSha: string; sourceBranch: string; changedFiles: string[]; additions: number; deletions: number; patch: string; status: ForgeRunArtifactStatus; createdAt: string; restoreStatus: "AVAILABLE" | "RESTORING" | "RESTORED" | "CONFLICT" | "FAILED"; publicationStatus: "LOCAL" | "BRANCHED" | "COMMITTED" | "PUSHED" | "PR_CREATED"; restoredAt: string | null; restoredRuntimeId: string | null; branchName: string | null; commitSha: string | null; pullRequestUrl: string | null; remoteBranch: string | null; pullRequestNumber: number | null; pullRequestTarget: string | null; publishedAt: string | null; pullRequestCreatedAt: string | null; conflictFiles: string[]; objective?: string };
 export type ForgeRunArtifactInput = Omit<ForgeRunArtifact, "artifactId" | "createdAt" | "restoreStatus" | "publicationStatus" | "restoredAt" | "restoredRuntimeId" | "branchName" | "commitSha" | "pullRequestUrl" | "remoteBranch" | "pullRequestNumber" | "pullRequestTarget" | "publishedAt" | "pullRequestCreatedAt" | "conflictFiles">;
-export type ForgeAgentStep = { stepId: string; runId: string; stepNumber: number; type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: "RUNNING" | "COMPLETED" | "FAILED"; startedAt: string; completedAt: string | null };
+export type ForgeAgentStep = { stepId: string; runId: string; stepNumber: number; type: ForgeAgentStepType; summary: string; tool: ForgeAgentToolName | null; input: Record<string, unknown>; resultSummary: string | null; status: ForgeAgentStepStatus; startedAt: string; completedAt: string | null };
 export type ForgeAgentDecision = { type: "PLAN"; summary: string; plan: string[] } | { type: "TOOL_CALL"; summary: string; tool: ForgeAgentToolName; input: Record<string, unknown> } | { type: "FINAL"; summary: string; report: string } | { type: "FAIL"; summary: string; error: string };
 export type ForgeMissionRequirements = { mutation: boolean; validation: boolean; gitStatus: boolean; gitDiff: boolean };
 type ForgeValidationRecovery = {

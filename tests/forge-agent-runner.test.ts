@@ -3,7 +3,7 @@ export {};
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
-const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentObjective, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS, createCompletionArtifactInput, FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS, ForgeAgentError } = require("../lib/forge/agent-foundation.ts");
+const { createForgeAgentRunner, deriveForgeMissionRequirements, normalizeAgentCommand, normalizeAgentObjective, normalizeAgentPath, sanitizeAgentText, FORGE_AGENT_LIMITS, FORGE_AGENT_STEP_TYPES, FORGE_AGENT_TOOL_NAMES, FORGE_AGENT_STEP_STATUSES, createCompletionArtifactInput, FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS, ForgeAgentError } = require("../lib/forge/agent-foundation.ts");
 const { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } = require("../lib/forge/agent-limits.ts");
 const { submitForgeComposer } = require("../lib/forge/forge-submit.ts");
 const { deriveForgeConversationTitle } = require("../lib/forge/conversation-title.ts");
@@ -389,6 +389,26 @@ test("routes agentiques exigent authenticateForge et n’exposent aucun secret",
 test("limite étapes empêche toute boucle infinie", async () => { const target = harness(Array.from({ length: FORGE_AGENT_LIMITS.maxSteps }, () => ({ type: "PLAN", summary: "plan", plan: ["continuer"] }))); await assert.rejects(() => target.runner.run("user-a", "conversation-a", "Mission"), (error: unknown) => (error as { code?: string }).code === "LIMIT"); assert.equal(target.steps.length, FORGE_AGENT_LIMITS.maxSteps); });
 test("runtime agentique revalide workspace runtime SHA et expiration", () => { const source = fs.readFileSync("lib/forge/agent-runtime.ts", "utf8"); assert.match(source, /findRuntimeByWorkspace/); assert.match(source, /runtime\.status !== "READY"/); assert.match(source, /runtime\.expiresAt/); assert.match(source, /runtime\.baseCommitSha !== workspace\.baseCommitSha/); assert.doesNotMatch(source, /child_process|execSync|spawnSync/); });
 test("migration RLS relie user projet conversation workspace et runtime", () => { const sql = fs.readFileSync("supabase/migrations/20260824_forge_v14_agentic_execution_loop.sql", "utf8"); for (const value of ["auth.uid() = forge_agent_runs.user_id", "c.id = forge_agent_runs.conversation_id", "p.id = forge_agent_runs.forge_project_id", "w.id = forge_agent_runs.workspace_id", "rt.id = forge_agent_runs.runtime_id", "auth.uid() = forge_agent_steps.user_id", "r.id = forge_agent_steps.run_id", "drop policy if exists", "enable row level security"]) assert.ok(sql.includes(value)); assert.doesNotMatch(sql, /provider_runtime_id|private key/i); });
+test("contrat DB des steps Forge reste synchronisé avec les types runtime", () => {
+  const foundation = fs.readFileSync("supabase/migrations/20260824_forge_v14_agentic_execution_loop.sql", "utf8");
+  const extension = fs.readFileSync("supabase/migrations/20260924135359_extend_forge_agent_step_tools.sql", "utf8");
+  const stepSchema = foundation.slice(foundation.indexOf("create table if not exists public.forge_agent_steps"));
+  const values = (sql: string, column: string) => {
+    const match = sql.match(new RegExp(`\\b${column}\\s+in\\s*\\(([^)]+)\\)`, "is"));
+    if (!match) throw new Error(`contrainte ${column} absente`);
+    return [...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]).sort();
+  };
+  assert.deepEqual(values(stepSchema, "type"), [...FORGE_AGENT_STEP_TYPES].sort());
+  assert.deepEqual(values(stepSchema, "status"), [...FORGE_AGENT_STEP_STATUSES].sort());
+  assert.deepEqual(values(extension, "tool"), [...FORGE_AGENT_TOOL_NAMES].sort());
+  assert.ok(FORGE_AGENT_TOOL_NAMES.includes("search_code"));
+  assert.match(extension, /drop constraint if exists forge_agent_steps_tool_check/i);
+  assert.match(extension, /add constraint forge_agent_steps_tool_check/i);
+  assert.doesNotMatch(extension, /drop table|truncate|disable row level security/i);
+  const runtime = fs.readFileSync("lib/forge/agent-foundation.ts", "utf8");
+  assert.match(runtime, /DISCOVERY_REQUIRED/);
+  assert.match(runtime, /PHASE_ACTION_REJECTED/);
+});
 test("titre automatique est déterministe et ne consomme aucun modèle", () => { assert.equal(deriveForgeConversationTitle("Inspecte package.json et indique le nom du projet."), "Inspection package.json"); });
 test("renommage session et titre automatique conservent auth ownership et titre manuel", () => { const route = fs.readFileSync("app/api/forge/conversations/[conversationId]/route.ts", "utf8"), store = fs.readFileSync("lib/forge/forge-store.ts", "utf8"); assert.match(route, /authenticateForge\(request\)/); assert.match(route, /setForgeConversationTitle\(user\.id/); assert.match(store, /getForgeConversation\(userId, conversationId\)/); assert.match(store, /conversation\.title !== DEFAULT_FORGE_CONVERSATION_TITLE/); });
 test("aucun secret ou accès host dans le bundle agentique", () => { const sources = ["lib/forge/agent-foundation.ts", "lib/forge/agent-model.ts", "lib/forge/agent-runtime.ts", "components/ForgeAgentRunnerPanel.tsx"].map((path) => fs.readFileSync(path, "utf8")).join("\n"); assert.doesNotMatch(sources, /process\.env\.(?:DAYTONA_API_KEY|GITHUB_APP_PRIVATE_KEY)|child_process|Bun\.spawn|Deno\.Command/); });
