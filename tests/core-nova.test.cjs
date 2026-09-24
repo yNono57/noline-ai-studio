@@ -19,6 +19,7 @@ const originalEnv={...process.env};
 // A narrow in-process PostgREST transport adapter. SQL is executed by PostgreSQL
 // under the caller's role; this is not a Supabase Auth or PostgREST integration test.
 before(async()=>{
+  process.env.NOLINE_APP_ENVIRONMENT='test';
   process.env.NEXT_PUBLIC_SUPABASE_URL='https://core-test.invalid';
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY='public-test-key';
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;

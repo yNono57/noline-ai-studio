@@ -848,7 +848,7 @@ test("recovery découvre le code pertinent après des lectures ambiguës puis co
   assert.equal(target.commands[0]?.command, "rg");
   assert.ok(target.reads.includes("lib/ai/gateway/model-gateway.ts"));
   assert.ok(target.writes.includes("lib/forge/usage-adapter.ts"));
-  assert.equal(target.constraints.filter((constraint) => constraint?.phase === "DISCOVERY_REQUIRED").length, 1);
+  assert.equal(target.constraints.filter((constraint) => constraint?.phase === "DISCOVERY_REQUIRED").length, 2);
   assert.equal(target.artifacts.length, 1);
 });
 test("découverte non pertinente répétée s'arrête au budget borné", async () => {
