@@ -1,15 +1,11 @@
 import { FORGE_RUNTIME_LIMITS, normalizeRuntimeCommand, normalizeRuntimePath, type ForgeRuntimeCommand, type ForgeRuntimeCommandResult, type ForgeRuntimeFile, type ForgeRuntimeFileEntry, type ForgeRuntimeGitDiff, type ForgeRuntimeGitStatus } from "./runtime-foundation";
 import { FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS } from "./agent-limits";
 import { buildForgeSearchArgs, classifyForgeValidation, compactForgeWorkingMemory, createForgeWorkingMemory, forgeSearchSignature, hasMutationProvenance, normalizeForgeSearchInput, parseForgeSearchOutput, rememberUnique, type ForgeSearchResult, type ForgeValidationClassification } from "./autonomy-foundation";
+import type { ForgeAgentRunStatus, ForgeAgentStepStatus, ForgeAgentStepType, ForgeAgentToolName } from "./step-contract";
+export { FORGE_AGENT_RUN_STATUSES, FORGE_AGENT_STEP_STATUSES, FORGE_AGENT_STEP_TYPES, FORGE_AGENT_TOOL_NAMES } from "./step-contract";
+export type { ForgeAgentRunStatus, ForgeAgentStepStatus, ForgeAgentStepType, ForgeAgentToolName } from "./step-contract";
 
 export const FORGE_AGENT_LIMITS = { maxSteps: 60, maxToolCalls: 48, maxRuntimeSeconds: 240, maxCommandTimeoutMs: 60_000, maxOutputCharacters: 20_000, maxObjectiveCharacters: FORGE_AGENT_MAX_OBJECTIVE_CHARACTERS, maxRecoveryDiscoveryCalls: 6, maxDiscoveryCalls: 12 } as const;
-export type ForgeAgentRunStatus = "QUEUED" | "PLANNING" | "RUNNING" | "VALIDATING" | "COMPLETED" | "FAILED" | "CANCELLED";
-export const FORGE_AGENT_STEP_TYPES = ["PLAN", "TOOL_CALL", "FINAL", "FAIL"] as const;
-export type ForgeAgentStepType = (typeof FORGE_AGENT_STEP_TYPES)[number];
-export const FORGE_AGENT_TOOL_NAMES = ["list_files", "search_code", "read_file", "write_file", "delete_file", "run_command", "git_status", "git_diff"] as const;
-export type ForgeAgentToolName = (typeof FORGE_AGENT_TOOL_NAMES)[number];
-export const FORGE_AGENT_STEP_STATUSES = ["RUNNING", "COMPLETED", "FAILED"] as const;
-export type ForgeAgentStepStatus = (typeof FORGE_AGENT_STEP_STATUSES)[number];
 export type ForgeAgentRun = { runId: string; userId: string; projectId: string; conversationId: string; workspaceId: string; runtimeId: string; status: ForgeAgentRunStatus; objective: string; baseCommitSha: string; plan: string[]; finalReport: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; lastActivityAt: string | null; error: string | null };
 export type ForgeAgentRunView = Omit<ForgeAgentRun, "userId">;
 export const FORGE_RUN_ARTIFACT_MAX_PATCH_CHARACTERS = 200_000;
