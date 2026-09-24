@@ -14,6 +14,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 const query = (values: Record<string, string>) => new URLSearchParams(values).toString();
 export const getGitHubConnectionClient = () => request<{ connection: ForgeGitHubConnection | null }>("/api/forge/github/connection");
 export const beginGitHubInstall = () => request<{ url: string }>("/api/forge/github/install");
+export const completeGitHubInstall = (completion: string) => request<{ connection: ForgeGitHubConnection }>("/api/forge/github/complete", { method: "POST", body: JSON.stringify({ completion }) });
 export const disconnectGitHub = () => request<void>("/api/forge/github/connection", { method: "DELETE" });
 export const listGitHubRepositories = () => request<{ repositories: Array<ForgeGitHubRepository & { visibility: string; description: string | null; updatedAt: string }> }>("/api/forge/github/repositories");
 export const listGitHubBranches = (repository: string) => request<{ branches: ForgeGitHubBranch[] }>(`/api/forge/github/repository/branches?${query({ repository })}`);

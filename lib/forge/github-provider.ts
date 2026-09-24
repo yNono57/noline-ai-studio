@@ -37,8 +37,16 @@ export async function getRepositoryInstallationToken(installationId: string, own
 }
 
 export async function getInstallationMetadata(installationId: string) {
-  const data = await github<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; suspended_at: string | null }>(`/app/installations/${installationId}`, createGitHubAppJwt());
-  return { installationId: String(data.id), accountId: String(data.account.id), accountLogin: data.account.login, accountType: data.account.type, status: data.suspended_at ? "revoked" as const : "active" as const };
+  const data = await github<{ id: number; account: { id: number; login: string; type: "User" | "Organization" }; suspended_at: string | null; repository_selection: "all" | "selected" }>(`/app/installations/${installationId}`, createGitHubAppJwt());
+  return { installationId: String(data.id), accountId: String(data.account.id), accountLogin: data.account.login, accountType: data.account.type, status: data.suspended_at ? "revoked" as const : "active" as const, repositorySelection: data.repository_selection };
+}
+
+export async function verifySelectedInstallation(installationId: string) {
+  const metadata = await getInstallationMetadata(installationId);
+  if (metadata.status !== "active" || metadata.repositorySelection !== "selected") throw new GitHubAppError("AUTHORIZATION", "L’installation GitHub doit être active et limitée aux repositories sélectionnés.");
+  const repositories = await listInstallationRepositories(installationId);
+  if (repositories.length === 0) throw new GitHubAppError("AUTHORIZATION", "Aucun repository n’est autorisé pour cette installation GitHub.");
+  return { metadata, repositories };
 }
 
 function mapRepository(repo: GitHubRepositoryResponse): ForgeGitHubRepository & { visibility: string; description: string | null; updatedAt: string } {

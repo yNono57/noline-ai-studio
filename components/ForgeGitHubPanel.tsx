@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, File, Folder, Github, Loader2, Plus, Search, Unplug, X } from "lucide-react";
 import type { ForgeGitHubFile, ForgeGitHubRepository, ForgeGitHubTreeEntry } from "@/lib/forge/github-foundation";
 import type { ForgeProject } from "@/lib/forge/forge-store";
-import { associateGitHubRepository, beginGitHubInstall, disconnectGitHub, getGitHubConnectionClient, listGitHubBranches, listGitHubRepositories, listGitHubTree, readGitHubFile, searchGitHubRepository } from "@/lib/forge/github-client";
+import { associateGitHubRepository, beginGitHubInstall, completeGitHubInstall, disconnectGitHub, getGitHubConnectionClient, listGitHubBranches, listGitHubRepositories, listGitHubTree, readGitHubFile, searchGitHubRepository } from "@/lib/forge/github-client";
 
 type Props = { project: ForgeProject | undefined; conversationId: string; contextFiles: ForgeGitHubFile[]; onProject: (project: ForgeProject) => void; onContext: (files: ForgeGitHubFile[]) => void };
 
@@ -23,13 +23,38 @@ export function ForgeGitHubPanel({ project, conversationId, contextFiles, onProj
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { getGitHubConnectionClient().then(({ connection }) => setConnection(connection?.status === "active" ? connection : null)).catch((caught) => setError(caught.message)); }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("github");
+    const completion = params.get("github_completion");
+    const clearCallback = () => {
+      params.delete("github");
+      params.delete("github_completion");
+      const query = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    };
+    if (status === "complete" && completion) {
+      setBusy(true);
+      setError("Autorisation GitHub reçue. Finalisation sécurisée en cours…");
+      completeGitHubInstall(completion)
+        .then(({ connection }) => { setConnection(connection); setError(""); })
+        .catch((caught) => setError(caught instanceof Error ? caught.message : "La connexion GitHub n’a pas pu être finalisée. Réessayez."))
+        .finally(() => { setBusy(false); clearCallback(); });
+      return;
+    }
+    if (status === "cancelled") setError("Autorisation GitHub annulée. Vous pouvez réessayer quand vous le souhaitez.");
+    else if (status === "failed") setError("Le callback GitHub a échoué ou a expiré. Relancez la connexion depuis Forge.");
+    getGitHubConnectionClient()
+      .then(({ connection }) => setConnection(connection?.status === "active" ? connection : null))
+      .catch(() => setError("Impossible de vérifier la connexion GitHub. Vérifiez votre session puis réessayez."));
+    if (status) clearCallback();
+  }, []);
   useEffect(() => { setRepository(project?.repository_identifier || ""); setBranch(project?.default_branch || ""); }, [project?.id, project?.repository_identifier, project?.default_branch]);
   useEffect(() => { if (!connection) return; listGitHubRepositories().then(({ repositories }) => setRepositories(repositories)).catch((caught) => setError(caught.message)); }, [connection]);
   useEffect(() => { if (!repository) { setBranches([]); setEntries([]); return; } listGitHubBranches(repository).then(({ branches }) => { const names = branches.map((item) => item.name); setBranches(names); setBranch((current) => names.includes(current) ? current : ""); }).catch((caught) => { setBranches([]); setBranch(""); setEntries([]); setError(caught.message); }); }, [repository]);
   useEffect(() => { if (!repository || !branch) { setEntries([]); return; } setBusy(true); setError(""); setEntries([]); listGitHubTree(repository, branch, path).then(({ entries }) => setEntries(entries)).catch((caught) => { setEntries([]); setError(caught.message); }).finally(() => setBusy(false)); }, [repository, branch, path]);
 
-  async function connect() { setError(""); try { const { url } = await beginGitHubInstall(); window.location.assign(url); } catch (caught) { setError(caught instanceof Error ? caught.message : "Connexion impossible."); } }
+  async function connect() { setBusy(true); setError("Ouverture de l’autorisation GitHub…"); try { const { url } = await beginGitHubInstall(); window.location.assign(url); } catch (caught) { setBusy(false); setError(caught instanceof Error ? caught.message : "Connexion GitHub impossible. Réessayez."); } }
   function resetBrowserToProject() { setRepository(project?.repository_identifier || ""); setBranch(project?.default_branch || ""); setPath(""); setEntries([]); setPreview(null); setResults([]); setSearched(false); }
   async function chooseRepository(value: string) {
     if (value !== repository) onContext([]); setRepository(value); setPath(""); setEntries([]); setPreview(null); setResults([]); setSearched(false); setError("");
@@ -46,7 +71,7 @@ export function ForgeGitHubPanel({ project, conversationId, contextFiles, onProj
   function addContext() { if (!preview || contextFiles.some((file) => file.path === preview.path)) return; if (!conversationId) { setError("Créez ou sélectionnez une session Forge avant d’ajouter un fichier au contexte."); return; } const total = contextFiles.reduce((sum, file) => sum + file.content.length, 0) + preview.content.length; if (contextFiles.length >= 12 || total > 120000) { setError("Limite du contexte atteinte : 12 fichiers et 120 000 caractères maximum."); return; } setError(""); onContext([...contextFiles, preview]); }
   async function runSearch(event: React.FormEvent) { event.preventDefault(); if (!search.trim()) return; setBusy(true); setError(""); setResults([]); setSearched(false); try { const { results } = await searchGitHubRepository(repository, search.trim()); setResults(results); setSearched(true); } catch (caught) { setError(caught instanceof Error ? caught.message : "Recherche indisponible."); } finally { setBusy(false); } }
 
-  if (!connection) return <section aria-label="Intégration GitHub" className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center gap-2 text-sm font-black text-white"><Github className="h-4 w-4 text-noline-orange" />GitHub non connecté</div><button type="button" onClick={connect} className="mt-3 w-full rounded-md bg-white/10 px-3 py-2 text-xs font-black text-white">Connecter GitHub</button>{error ? <p role="alert" className="mt-2 text-xs text-red-300">{error}</p> : null}</section>;
+  if (!connection) return <section aria-label="Intégration GitHub" className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center gap-2 text-sm font-black text-white"><Github className="h-4 w-4 text-noline-orange" />{busy ? "Autorisation GitHub en cours" : "GitHub non connecté"}</div><button type="button" onClick={connect} disabled={busy} className="mt-3 w-full rounded-md bg-white/10 px-3 py-2 text-xs font-black text-white disabled:opacity-60">{busy ? "Connexion en cours…" : "Connecter GitHub"}</button>{error ? <p role="status" className="mt-2 text-xs text-amber-200">{error}</p> : null}</section>;
   return <section aria-label="Intégration GitHub" className="mt-5 border-t border-white/10 pt-4 text-xs"><div className="flex items-center justify-between"><span className="font-black text-white">@{connection.accountLogin}</span><button type="button" aria-label="Déconnecter GitHub localement" onClick={() => disconnectGitHub().then(() => setConnection(null))} className="text-noline-muted"><Unplug className="h-4 w-4" /></button></div>{error ? <p role="alert" className="mt-2 text-red-300">{error}</p> : null}
     <label className="mt-3 block text-noline-muted">Repository<select className="field mt-1" value={repository} onChange={(event) => chooseRepository(event.target.value)}><option value="">Sélectionner…</option>{repositories.map((item) => <option key={item.id} value={item.fullName}>{item.fullName} · {item.visibility}</option>)}</select></label>
     <label className="mt-2 block text-noline-muted">Branche<select className="field mt-1" value={branch} onChange={(event) => { if (event.target.value !== branch) onContext([]); setBranch(event.target.value); setPath(""); setEntries([]); setPreview(null); setResults([]); setSearched(false); setError(""); saveSelection(event.target.value); }}><option value="">Sélectionner…</option>{branches.map((name) => <option key={name}>{name}</option>)}</select></label>

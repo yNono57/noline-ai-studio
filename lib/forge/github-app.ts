@@ -1,8 +1,7 @@
 import "server-only";
 
-import { createHmac, createPrivateKey, createSign, randomBytes, timingSafeEqual } from "node:crypto";
-
-const STATE_TTL_SECONDS = 10 * 60;
+import { createPrivateKey, createSign } from "node:crypto";
+import { createGitHubOnboardingState, verifyGitHubOnboardingState } from "./github-onboarding";
 
 export class GitHubAppError extends Error {
   constructor(readonly code: "CONFIGURATION" | "AUTHORIZATION" | "NOT_FOUND" | "LIMIT" | "UPSTREAM", message: string) {
@@ -38,31 +37,12 @@ export function createGitHubAppJwt(nowSeconds = Math.floor(Date.now() / 1000)) {
   return `${unsigned}.${base64url(signature)}`;
 }
 
-type GitHubState = { userId: string; nonce: string; expiresAt: number };
-
-export function createGitHubState(userId: string) {
-  const config = getGitHubAppConfig();
-  const value: GitHubState = { userId, nonce: randomBytes(24).toString("base64url"), expiresAt: Date.now() + STATE_TTL_SECONDS * 1000 };
-  const payload = base64url(JSON.stringify(value));
-  const signature = createHmac("sha256", config.stateSecret).update(payload).digest("base64url");
-  return { state: `${payload}.${signature}`, nonce: value.nonce, maxAge: STATE_TTL_SECONDS };
+export function createGitHubState(userId: string, returnOrigin: string) {
+  return createGitHubOnboardingState(userId, returnOrigin, getGitHubAppConfig().stateSecret);
 }
 
-export function verifyGitHubState(state: string, expectedNonce: string | undefined, now = Date.now()): GitHubState {
-  const config = getGitHubAppConfig();
-  const [payload, providedSignature, extra] = state.split(".");
-  if (!payload || !providedSignature || extra) throw new GitHubAppError("AUTHORIZATION", "State GitHub invalide.");
-  const expectedSignature = createHmac("sha256", config.stateSecret).update(payload).digest("base64url");
-  const left = Buffer.from(providedSignature);
-  const right = Buffer.from(expectedSignature);
-  if (left.length !== right.length || !timingSafeEqual(left, right)) throw new GitHubAppError("AUTHORIZATION", "State GitHub invalide.");
-  let parsed: unknown;
-  try { parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")); } catch { throw new GitHubAppError("AUTHORIZATION", "State GitHub invalide."); }
-  const value = parsed as Partial<GitHubState>;
-  if (!value.userId || !value.nonce || !value.expiresAt || value.expiresAt < now || !expectedNonce || value.nonce !== expectedNonce) {
-    throw new GitHubAppError("AUTHORIZATION", "La connexion GitHub a expiré ou n’est pas valide.");
-  }
-  return value as GitHubState;
+export function verifyGitHubState(state: string, now = Date.now()) {
+  return verifyGitHubOnboardingState(state, getGitHubAppConfig().stateSecret, now);
 }
 
 export function getGitHubInstallUrl(state: string) {
