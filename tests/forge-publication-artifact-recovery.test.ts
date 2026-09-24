@@ -81,6 +81,8 @@ test("artifact créé est relié au runtime producteur et UI expose la progressi
   assert.match(store, /restore_status: "RESTORED"/);
   assert.match(store, /restored_runtime_id: run\.runtimeId/);
   assert.match(ui, /artifact\.restoredRuntimeId === runtimeId/);
+  assert.match(ui, /conversationId, refreshKey/);
+  assert.match(workspace, /refreshKey=\{agentPayload\?\.artifact\?\.artifactId/);
   assert.match(ui, /Runtime requis/);
   for (const label of ["Créer une branche", "Créer un commit", "Push vers GitHub", "Créer une Pull Request"]) assert.match(ui, new RegExp(label));
   assert.match(workspace, /publication contrôlée/);
