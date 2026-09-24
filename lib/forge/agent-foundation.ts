@@ -381,11 +381,22 @@ function forcedPhaseDecision(phase: ForgeAgentPhase, recovery: ForgeValidationRe
 }
 async function decideForPhase(model: ForgeAgentModelProvider, context: ForgeAgentModelContext, phase: ForgeAgentPhase, recovery: ForgeValidationRecovery | null) {
   const constraint = decisionConstraint(phase, recovery);
+  let retryContext = context;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const decision = await model.decide(context, constraint);
+    const decision = await model.decide(retryContext, constraint);
     if (isDecisionCompatible(decision, constraint, recovery)) return decision;
+    retryContext = incompatibleDecisionRetryContext(retryContext, constraint, decision, attempt);
   }
   throw new ForgeAgentError("MODEL", `Le modèle Forge n'a produit aucune action compatible avec la phase ${phase}.`);
+}
+function incompatibleDecisionRetryContext(context: ForgeAgentModelContext, constraint: ForgeAgentDecisionConstraint, decision: ForgeAgentDecision, attempt: number): ForgeAgentModelContext {
+  const rejectedAction = decision.type === "TOOL_CALL" ? `${decision.type}:${decision.tool}` : decision.type;
+  const resultSummary = sanitizeAgentText(`PHASE_ACTION_REJECTED attempt=${attempt}/3 phase=${constraint.phase} rejected=${rejectedAction}. Cette réponse n'a exécuté aucune action et ne modifie pas les Completion Gates. NEXT_REQUIRED_ACTION: retourne exactement un type autorisé (${constraint.allowedDecisionTypes.join(", ")})${constraint.allowedTools.length ? ` avec un outil autorisé (${constraint.allowedTools.join(", ")})` : ""}. ${constraint.instruction}`, 4_000);
+  const retryStep: ForgeAgentModelContext["steps"][number] = { type: "FAIL", summary: "Décision incompatible avec la phase", tool: null, input: {}, resultSummary, status: "FAILED" };
+  return {
+    ...context,
+    steps: [...context.steps, retryStep].slice(-12),
+  };
 }
 function isDecisionCompatible(decision: ForgeAgentDecision, constraint: ForgeAgentDecisionConstraint, recovery: ForgeValidationRecovery | null) {
   if (!constraint.allowedDecisionTypes.includes(decision.type)) return false;
@@ -480,6 +491,7 @@ function extractRecoveryCandidatePaths(output: string) {
   const candidates = new Set<string>();
   const pattern = /(?:^|[\s("'`])((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|json|css|scss|html|vue|svelte|py|go|rs|java|kt|c|cpp|h|md))(?=[:(\s"'`]|$)/gim;
   for (const match of output.matchAll(pattern)) {
+    if (/^node\.js$/i.test(match[1])) continue;
     try { candidates.add(normalizeAgentPath(match[1])); } catch { /* Ignore unsafe or host paths. */ }
     if (candidates.size >= 8) break;
   }

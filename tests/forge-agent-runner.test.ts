@@ -643,7 +643,15 @@ test("validation npm non nulle impose correction puis autorise la revalidation e
     build,
     premature,
     { type: "FAIL", summary: "Abandon", error: "Mission incomplète." },
-    (_context: Record<string, unknown>, constraint?: Record<string, unknown>) => { assert.equal(constraint?.phase, "CORRECTION_REQUIRED"); assert.deepEqual(constraint?.allowedTools, ["write_file", "delete_file"]); return { type: "TOOL_CALL", summary: "Corriger application", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } }; },
+    (context: Record<string, unknown>, constraint?: Record<string, unknown>) => {
+      const retry = JSON.stringify(context);
+      assert.equal(constraint?.phase, "CORRECTION_REQUIRED");
+      assert.deepEqual(constraint?.allowedTools, ["write_file", "delete_file"]);
+      assert.match(retry, /PHASE_ACTION_REJECTED attempt=1\/3 phase=CORRECTION_REQUIRED rejected=FINAL/);
+      assert.match(retry, /PHASE_ACTION_REJECTED attempt=2\/3 phase=CORRECTION_REQUIRED rejected=FAIL/);
+      assert.match(retry, /NEXT_REQUIRED_ACTION/);
+      return { type: "TOOL_CALL", summary: "Corriger application", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } };
+    },
     premature,
     build,
     { type: "FINAL", summary: "Terminé", report: "Application corrigée et build réussi." },
@@ -759,7 +767,32 @@ test("vrai anti-loop refuse trois terminaisons incompatibles sans consommer de s
   assert.equal(target.steps.filter((step) => step.summary === "Mission incomplète").length, 0);
   assert.equal(target.steps.length, 3);
   assert.equal(target.constraints.filter((constraint) => constraint?.phase === "CORRECTION_REQUIRED").length, 3);
+  const correctionContexts = target.contexts.filter((_, index) => target.constraints[index]?.phase === "CORRECTION_REQUIRED");
+  assert.doesNotMatch(JSON.stringify(correctionContexts[0]), /PHASE_ACTION_REJECTED/);
+  assert.match(JSON.stringify(correctionContexts[1]), /PHASE_ACTION_REJECTED attempt=1\/3/);
+  assert.match(JSON.stringify(correctionContexts[2]), /PHASE_ACTION_REJECTED attempt=2\/3/);
   assert.ok(target.commands.length < FORGE_AGENT_LIMITS.maxToolCalls);
+});
+test("diagnostic de validation ignore la bannière Node.js et lit le vrai fichier en erreur", async () => {
+  const build = { type: "TOOL_CALL", summary: "Build", tool: "run_command", input: { command: "npm", args: ["run", "build"], cwd: ".", validation: true } };
+  const target = harness([
+    build,
+    { type: "TOOL_CALL", summary: "Corriger source", tool: "write_file", input: { path: "src/App.tsx", content: "export default function App() { return <main>ready</main>; }" } },
+    build,
+    { type: "FINAL", summary: "Terminé", report: "Source corrigée et build réussi." },
+    { type: "FINAL", summary: "Terminé", report: "Source corrigée, build et Git status réussis." },
+    { type: "FINAL", summary: "Terminé", report: "Source corrigée, build, Git status et Git diff réussis." },
+  ], false, {
+    files: { "src/App.tsx": "export default () => <main>broken</main>" },
+    commandResults: [
+      { stdout: "New version of Node.js available\nsrc/App.tsx:1:1 TypeScript error", stderr: "", exitCode: 1, timedOut: false, truncated: false, durationMs: 5 },
+      { stdout: "build PASS", stderr: "", exitCode: 0, timedOut: false, truncated: false, durationMs: 5 },
+    ],
+  });
+  const result = await target.runner.run("user-a", "conversation-a", "Corrige l'application, lance le build puis vérifie Git status et Git diff.");
+  assert.equal(result.status, "COMPLETED");
+  assert.ok(target.reads.includes("src/App.tsx"));
+  assert.equal(target.reads.includes("Node.js"), false);
 });
 test("ENOENT du cwd Daytona ne transforme pas package.json repository en fichier absent", async () => {
   const typecheck = { type: "TOOL_CALL", summary: "Typecheck", tool: "run_command", input: { command: "npm", args: ["run", "typecheck"], validation: true } };
