@@ -1,0 +1,15 @@
+{
+  "exceptions": [
+    {
+      "advisoryId": "GHSA-vfj7-8cjw-p6xm",
+      "cve": "CVE-2026-93687",
+      "package": "braces",
+      "reason": "Temporary exception: NOLINE does not pass user-controlled brace patterns to braces. Runtime Daytona usage is limited to Sandbox operations and does not call Image.extractCopySources; Tailwind and ESLint paths execute only during trusted build/development workflows.",
+      "exposureAnalysis": "HTTP, NOVA, Agent Builder, uploads and Forge mission inputs do not invoke braces. Forge search_code executes rg with normalized literal terms, bounded paths and extensions. Repository filenames/content remain data handled inside the sandbox and are not passed to the Daytona SDK Image Dockerfile glob helper.",
+      "approvedOn": "2026-10-05",
+      "expiresOn": "2026-10-19",
+      "upstreamStatus": "GitHub Advisory reports no patched version as of approval.",
+      "removalCondition": "Remove immediately when a compatible patched braces release is available, update dependencies and lockfile, and restore zero accepted advisories."
+    }
+  ]
+}
