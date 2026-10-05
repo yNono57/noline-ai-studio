@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "audit:security": "node scripts/security/audit-policy.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts && npm run test:core",
     "test:core": "node --conditions=react-server --import tsx --test tests/core-*.test.cjs"
